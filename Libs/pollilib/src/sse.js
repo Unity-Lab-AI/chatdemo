@@ -1,4 +1,3 @@
-// Minimal SSE parser for fetch(Response).body (ReadableStream) - browser friendly
 export async function* sseEvents(response) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -26,7 +25,6 @@ export async function* sseEvents(response) {
       }
     }
   }
-  // flush
   if (eventLines.length) {
     const data = eventLines
       .filter(l => l.startsWith('data:'))
@@ -35,4 +33,3 @@ export async function* sseEvents(response) {
     if (data) yield data;
   }
 }
-
