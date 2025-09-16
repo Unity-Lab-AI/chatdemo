@@ -4,6 +4,9 @@
   "description": "A demo application for PolliLib and the unity chat bot",
   "main": "index.js",
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -26,5 +29,8 @@
   "bugs": {
     "url": "https://github.com/Unity-Lab-AI/chatdemo/issues"
   },
-  "homepage": "https://github.com/Unity-Lab-AI/chatdemo#readme"
+  "homepage": "https://github.com/Unity-Lab-AI/chatdemo#readme",
+  "devDependencies": {
+    "vite": "^5.3.0"
+  }
 }
