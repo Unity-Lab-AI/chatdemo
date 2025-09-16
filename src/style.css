@@ -23,6 +23,18 @@ body {
   padding: 1.5rem;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 main.container {
   width: min(960px, 100%);
   background: rgba(255, 255, 255, 0.92);
@@ -39,7 +51,7 @@ header.toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
 }
 
@@ -50,16 +62,86 @@ header.toolbar {
   min-width: 200px;
 }
 
-header.toolbar > button {
-  align-self: flex-end;
-}
-
 .toolbar label {
   font-size: 0.85rem;
   font-weight: 600;
   color: #52606d;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.field.toggle {
+  flex: 1 1 180px;
+  max-width: 240px;
+  justify-content: center;
+}
+
+.field.toggle .toggle-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #52606d;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.field.toggle .switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  padding: 0.2rem 0;
+}
+
+.field.toggle .switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.field.toggle .slider {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+
+.field.toggle .slider::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.field.toggle .switch input:checked + .slider {
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+}
+
+.field.toggle .switch input:checked + .slider::before {
+  transform: translateX(22px);
+}
+
+.field.toggle .toggle-state::after {
+  content: 'Off';
+  font-size: 0.8rem;
+  color: #94a3b8;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.field.toggle .switch input:checked + .slider + .toggle-state::after {
+  content: 'On';
+  color: #4f46e5;
 }
 
 select,
@@ -162,20 +244,23 @@ textarea:focus {
 
 .chat-form {
   display: flex;
-  flex-direction: column;
+  align-items: stretch;
   gap: 0.75rem;
 }
 
 .chat-form textarea {
-  min-height: 110px;
+  flex: 1;
+  min-height: 120px;
   resize: vertical;
 }
 
-.chat-form .actions {
-  display: flex;
+.chat-form button {
+  align-self: stretch;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  justify-content: center;
+  min-width: 110px;
+  white-space: nowrap;
 }
 
 button {
@@ -236,6 +321,16 @@ button.play {
   font-size: 0.9rem;
 }
 
+.audio-status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #4f46e5;
+}
+
+.audio-status.error {
+  color: #dc2626;
+}
+
 .hint {
   margin: 0;
   font-size: 0.85rem;
@@ -259,5 +354,13 @@ button.play {
 
   .messages {
     max-height: none;
+  }
+
+  .chat-form {
+    flex-direction: column;
+  }
+
+  .chat-form button {
+    width: 100%;
   }
 }

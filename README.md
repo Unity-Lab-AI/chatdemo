@@ -5,9 +5,9 @@ Static browser demo for interacting with [Pollinations](https://pollinations.ai)
 static host such as GitHub Pages. It features:
 
 - Text chat powered by PolliLib's `chat()` helper.
-- `/image` command for on-demand image generations.
+- Assistant-guided and manual (`/image`) Pollinations image generation.
 - Model selector populated from the Pollinations text model catalog.
-- Voice selector using PolliLib text-to-speech with options such as `nova` and `ash`.
+- Voice selector paired with an optional playback toggle for text-to-speech responses.
 - Browser voice capture (Web Speech API) with an automatic 0.5 second silence timeout.
 
 ## Development
