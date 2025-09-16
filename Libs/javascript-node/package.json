@@ -1,0 +1,18 @@
+{
+  "name": "polliLib-node",
+  "version": "0.1.0",
+  "description": "Node.js client for Pollinations.AI using POLLINATIONS_TOKEN.",
+  "type": "module",
+  "exports": "./index.js",
+  "main": "./index.js",
+  "module": "./index.js",
+  "engines": { "node": ">=18.0.0" },
+  "keywords": ["pollinations", "ai", "node", "image", "text", "audio", "vision", "sse"],
+  "license": "MIT",
+  "author": "PolliLibs",
+  "dependencies": {},
+  "scripts": {
+    "test": "node --version"
+  }
+}
+

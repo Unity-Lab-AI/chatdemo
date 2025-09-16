@@ -1,0 +1,16 @@
+{
+  "name": "polliLib",
+  "version": "0.1.0",
+  "description": "JavaScript client library for Pollinations.AI (images, text, audio, vision, feeds, tools, MCP).",
+  "type": "module",
+  "exports": "./index.js",
+  "main": "./index.js",
+  "module": "./index.js",
+  "engines": { "node": ">=18.0.0" },
+  "keywords": ["pollinations", "ai", "image", "text", "audio", "vision", "sse"],
+  "license": "MIT",
+  "author": "PolliLibs",
+  "dependencies": {},
+  "scripts": { "test": "node --test" },
+  "devDependencies": {}
+}

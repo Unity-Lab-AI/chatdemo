@@ -1,0 +1,30 @@
+{
+  "name": "unitychatdemo",
+  "version": "0.0.1",
+  "description": "A demo application for PolliLib and the unity chat bot",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Unity-Lab-AI/chatdemo.git"
+  },
+  "keywords": [
+    "ai",
+    "unity",
+    "unityai",
+    "unitylab",
+    "unitylabai",
+    "unityailab",
+    "chatbot",
+    "chat",
+    "bot"
+  ],
+  "author": "Sponge (hackall360)",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/Unity-Lab-AI/chatdemo/issues"
+  },
+  "homepage": "https://github.com/Unity-Lab-AI/chatdemo#readme"
+}
