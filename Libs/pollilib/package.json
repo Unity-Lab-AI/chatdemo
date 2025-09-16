@@ -1,0 +1,12 @@
+{
+  "name": "pollilib",
+  "version": "0.2.0",
+  "description": "Universal Pollinations API wrapper usable from browsers or Node",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "sideEffects": false
+}
