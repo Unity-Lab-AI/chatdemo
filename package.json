@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "A demo application for PolliLib and the unity chat bot",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
