@@ -24,10 +24,17 @@ export async function run() {
   const fakeFetch = async (url, init) => {
     const entry = { url: String(url), init: { ...(init ?? {}) } };
     requests.push(entry);
-    const model = entry.url.endsWith('/seed') ? 'unity' : 'openai';
-    return new Response(createResponseBody(model), {
+    const method = entry.init.method ?? 'GET';
+    if (method === 'POST') {
+      const model = entry.url.endsWith('/openai') ? 'openai' : 'unknown';
+      return new Response(createResponseBody(model), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response('Hello from Pollinations!', {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain' },
     });
   };
 
@@ -42,7 +49,9 @@ export async function run() {
 
   const seedResponse = await chat({ model: 'unity', endpoint: 'seed', messages }, client);
   assert.equal(seedResponse.model, 'unity');
-  assert.equal(requests[1].init.method, 'POST');
-  assert.ok(requests[1].url.endsWith('/seed'));
-  assert.equal(JSON.parse(requests[1].init.body).model, 'unity');
+  assert.equal(seedResponse.choices[0].message.content, 'Hello from Pollinations!');
+  assert.equal(requests[1].init.method, 'GET');
+  const seedUrl = new URL(requests[1].url);
+  assert.equal(seedUrl.searchParams.get('model'), 'unity');
+  assert(seedUrl.pathname.length > 1, 'Seed request should encode the prompt in the path');
 }
