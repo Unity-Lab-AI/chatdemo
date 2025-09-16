@@ -510,6 +510,9 @@ async function generateImageAsset(prompt, { width, height, model: imageModel } =
         width,
         height,
         model: imageModel,
+        nologo: true,
+        private: true,
+        enhance: true,
       },
       client,
     );
