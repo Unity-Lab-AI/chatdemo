@@ -74,12 +74,14 @@ export async function chat({
   tool_choice,
   response_format,
   timeoutMs,
+  endpoint,
 } = {}, client = getDefaultClient()) {
   if (!model) throw new Error('chat() requires a model');
   if (!Array.isArray(messages) || !messages.length) {
     throw new Error('chat() requires a non-empty messages array');
   }
-  const url = `${client.textBase}/openai`;
+  const targetEndpoint = resolveChatEndpoint(endpoint);
+  const url = `${client.textBase}/${encodeURIComponent(targetEndpoint)}`;
   const body = { model, messages };
   if (seed != null) body.seed = seed;
   if (temperature != null) body.temperature = temperature;
@@ -123,4 +125,20 @@ export async function textModels(client = getDefaultClient()) {
 
 export async function search(query, model = 'searchgpt', client = getDefaultClient()) {
   return await text(query, { model }, client);
+}
+
+function resolveChatEndpoint(endpoint) {
+  if (endpoint == null) return 'openai';
+  let value = String(endpoint).trim();
+  if (!value) return 'openai';
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    try {
+      const url = new URL(value);
+      value = url.pathname;
+    } catch {
+      return 'openai';
+    }
+  }
+  value = value.replace(/^\/+/u, '').replace(/\/+$/u, '').toLowerCase();
+  return value || 'openai';
 }

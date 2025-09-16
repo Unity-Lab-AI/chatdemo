@@ -6,10 +6,15 @@ import {
   textModels,
   tts,
 } from '../Libs/pollilib/index.js';
+import {
+  createFallbackModel,
+  matchesModelIdentifier,
+  normalizeTextCatalog,
+} from './model-catalog.js';
 
 const FALLBACK_MODELS = [
-  { name: 'openai', description: 'OpenAI GPT-5 Nano (fallback)' },
-  { name: 'mistral', description: 'Mistral Small (fallback)' },
+  createFallbackModel('openai', 'OpenAI GPT-5 Nano (fallback)'),
+  createFallbackModel('mistral', 'Mistral Small (fallback)'),
 ];
 
 const FALLBACK_VOICES = ['nova', 'ash', 'alloy', 'echo', 'fable'];
@@ -134,6 +139,7 @@ const state = {
   messages: [],
   loading: false,
   models: [],
+  activeModel: null,
   voicePlayback: false,
   statusMessage: DEFAULT_STATUS,
   statusError: false,
@@ -187,6 +193,7 @@ function addMessage(message) {
 
 function resetConversation({ clearMessages = false } = {}) {
   state.conversation = [createSystemMessage()];
+  state.activeModel = null;
   if (clearMessages) {
     state.messages = [];
     messageIdCounter = 0;
@@ -358,24 +365,21 @@ function normalizeContent(content) {
 }
 
 async function sendPrompt(prompt) {
-  const model = els.modelSelect.value || state.models[0]?.name;
-  if (!model) {
+  const selectedModel = getSelectedModel();
+  if (!selectedModel) {
     throw new Error('No model selected.');
+  }
+  const endpoints = buildEndpointSequence(selectedModel);
+  if (!endpoints.length) {
+    throw new Error(`No endpoints available for model "${selectedModel.label ?? selectedModel.id}".`);
   }
   const startingLength = state.conversation.length;
   state.conversation.push({ role: 'user', content: prompt });
   try {
     setStatus('Waiting for the model…');
-    const response = await chat(
-      {
-        model,
-        messages: state.conversation,
-        tools: [IMAGE_TOOL],
-        tool_choice: 'auto',
-      },
-      client,
-    );
-    await handleChatResponse(response, model);
+    const { response, endpoint } = await requestChatCompletion(selectedModel, endpoints);
+    state.activeModel = { id: selectedModel.id, endpoint, info: selectedModel };
+    await handleChatResponse(response, selectedModel, endpoint);
     resetStatusIfIdle();
   } catch (error) {
     console.error('Chat error', error);
@@ -384,7 +388,7 @@ async function sendPrompt(prompt) {
   }
 }
 
-async function handleChatResponse(initialResponse, model) {
+async function handleChatResponse(initialResponse, model, endpoint) {
   let response = initialResponse;
   while (true) {
     const choice = response?.choices?.[0];
@@ -408,13 +412,21 @@ async function handleChatResponse(initialResponse, model) {
       await handleToolCalls(message.tool_calls);
       response = await chat(
         {
-          model,
+          model: model.id,
+          endpoint,
           messages: state.conversation,
           tools: [IMAGE_TOOL],
           tool_choice: 'auto',
         },
         client,
       );
+      if (response?.model && !isMatchingModelName(response.model, model)) {
+        console.warn(
+          'Model mismatch detected after tool call. Expected %s, received %s.',
+          model.id,
+          response?.model,
+        );
+      }
       continue;
     }
 
@@ -572,13 +584,14 @@ function populateModels(models) {
   els.modelSelect.innerHTML = '';
   for (const model of models) {
     const option = document.createElement('option');
-    option.value = model.name;
-    option.textContent = model.description ? `${model.name} — ${model.description}` : model.name;
+    option.value = model.id;
+    option.textContent = model.description ? `${model.label} — ${model.description}` : model.label;
+    option.dataset.modelId = model.id;
     els.modelSelect.appendChild(option);
   }
-  const preferred = models.find(m => m.name === 'openai') ?? models[0];
+  const preferred = models.find(model => matchesModelIdentifier('openai', model)) ?? models[0];
   if (preferred) {
-    els.modelSelect.value = preferred.name;
+    els.modelSelect.value = preferred.id;
   }
 }
 
@@ -607,11 +620,12 @@ function populateVoices(voices) {
 async function loadModels() {
   setStatus('Loading models…');
   try {
-    const models = await textModels(client);
+    const catalog = await textModels(client);
+    const models = normalizeTextCatalog(catalog);
     if (!Array.isArray(models) || !models.length) {
       throw new Error('Received an empty model list');
     }
-    state.models = models.sort((a, b) => a.name.localeCompare(b.name));
+    state.models = models.sort((a, b) => a.label.localeCompare(b.label));
     populateModels(state.models);
     const voiceModel = state.models.find(model => Array.isArray(model.voices) && model.voices.length > 0);
     populateVoices(voiceModel?.voices ?? FALLBACK_VOICES);
@@ -619,12 +633,145 @@ async function loadModels() {
     setStatus(DEFAULT_STATUS);
   } catch (error) {
     console.warn('Failed to load models, falling back to defaults', error);
-    state.models = FALLBACK_MODELS;
+    state.models = FALLBACK_MODELS.map(model => ({
+      ...model,
+      endpoints: Array.isArray(model.endpoints) ? [...model.endpoints] : ['openai'],
+      identifiers: model.identifiers ? new Set(model.identifiers) : new Set(),
+      hints: model.hints ? new Set(model.hints) : new Set(),
+    }));
     populateModels(state.models);
     populateVoices(FALLBACK_VOICES);
     resetConversation({ clearMessages: true });
     setStatus('Using fallback models. Some features may be limited.', { error: true });
   }
+}
+
+function getSelectedModel() {
+  if (!state.models.length) return null;
+  const rawValue = els.modelSelect.value;
+  if (!rawValue) return state.models[0];
+  const normalized = String(rawValue).trim().toLowerCase();
+  for (const model of state.models) {
+    if (model?.identifiers?.has?.(normalized)) {
+      return model;
+    }
+  }
+  return state.models[0];
+}
+
+function buildEndpointSequence(model) {
+  if (!model) return [];
+  const result = [];
+  const seen = new Set();
+  const add = endpoint => {
+    if (!endpoint && endpoint !== 0) return;
+    const normalized = String(endpoint).trim().toLowerCase();
+    if (!normalized) return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    result.push(normalized);
+  };
+
+  if (Array.isArray(model.endpoints)) {
+    model.endpoints.forEach(add);
+  }
+
+  const provider = String(model?.provider ?? '').toLowerCase();
+  const tier = String(model?.tier ?? '').toLowerCase();
+  const hintValues = Array.from(new Set([...(model?.hints ?? []), ...(model?.identifiers ?? [])]));
+
+  const indicatesSeed =
+    hintValues.some(value =>
+      ['seed', 'pollinations', 'unity', 'flux', 'kontext', 'chatdolphin', 'hunyuan', 'kling', 'blackforest'].some(marker =>
+        value.includes(marker),
+      ),
+    ) || provider.includes('pollinations') || provider.includes('seed') || tier.includes('seed');
+
+  const indicatesOpenAi =
+    hintValues.some(value =>
+      [
+        'openai',
+        'gpt',
+        'claude',
+        'anthropic',
+        'mistral',
+        'llama',
+        'deepseek',
+        'grok',
+        'sonnet',
+        'opus',
+      ].some(marker => value.includes(marker)),
+    ) || provider.includes('openai');
+
+  if (indicatesSeed) add('seed');
+  if (indicatesOpenAi || !result.length) add('openai');
+  if (indicatesSeed && !seen.has('openai')) add('openai');
+
+  return result;
+}
+
+function isMatchingModelName(value, model) {
+  if (!value && value !== 0) return false;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return false;
+  const identifiers = model?.identifiers;
+  if (identifiers?.has?.(normalized)) return true;
+  if (normalized.includes('/')) {
+    const last = normalized.split('/').pop();
+    if (last && identifiers?.has?.(last)) return true;
+  }
+  return false;
+}
+
+async function requestChatCompletion(model, endpoints) {
+  if (!model) {
+    throw new Error('No model selected.');
+  }
+  if (!Array.isArray(endpoints) || !endpoints.length) {
+    throw new Error(`No endpoints available for model "${model.label ?? model.id}".`);
+  }
+
+  const attemptErrors = [];
+  for (const endpoint of endpoints) {
+    try {
+      const response = await chat(
+        {
+          model: model.id,
+          endpoint,
+          messages: state.conversation,
+          tools: [IMAGE_TOOL],
+          tool_choice: 'auto',
+        },
+        client,
+      );
+      if (!response?.model || isMatchingModelName(response.model, model)) {
+        return { response, endpoint };
+      }
+      attemptErrors.push(
+        new Error(
+          `Endpoint "${endpoint}" responded with "${response?.model ?? 'unknown'}" instead of "${model.id}".`,
+        ),
+      );
+    } catch (error) {
+      attemptErrors.push(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  if (attemptErrors.length) {
+    const summary = attemptErrors
+      .map(err => err?.message ?? String(err))
+      .filter(Boolean)
+      .join('; ');
+    const aggregated = new Error(
+      summary.length
+        ? `Unable to reach model "${model.id}". Attempts: ${summary}`
+        : `Unable to reach model "${model.id}".`,
+    );
+    aggregated.attempts = attemptErrors;
+    throw aggregated;
+  }
+
+  throw new Error(`Unable to reach model "${model.id}".`);
 }
 
 function setupRecognition() {
