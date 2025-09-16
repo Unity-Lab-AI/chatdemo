@@ -30,3 +30,17 @@ npm run build
 
 The generated assets are written to `dist/` and can be published as-is. When hosted on GitHub Pages
 make sure the contents of `dist/` are deployed.
+
+## Configuring the Pollinations token
+
+Pollinations models that require tiered access need a token on every request. The application now
+expects the token to be provided at runtime so it is never bundled into the static assets.
+
+- **GitHub Pages / production** – Provide the `POLLI_TOKEN` secret in the repository (or Pages
+  environment). The included Pages Function at `.github/functions/polli-token.js` exposes the token
+  at runtime via `/api/polli-token`, and responses are marked as non-cacheable.
+- **Local development** – Either define `POLLI_TOKEN`/`VITE_POLLI_TOKEN` in your shell when running
+  `npm run dev`, add a `<meta name="pollinations-token" ...>` tag to `index.html`, or inject
+  `window.__POLLINATIONS_TOKEN__` before the application bootstraps.
+
+If the token cannot be resolved the UI remains disabled and an error is shown in the status banner.
