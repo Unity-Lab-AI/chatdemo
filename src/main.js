@@ -1,11 +1,6 @@
 import './style.css';
-import {
-  PolliClient,
-  chat,
-  image,
-  textModels,
-  tts,
-} from '../Libs/pollilib/index.js';
+import { chat, image, textModels, tts } from '../Libs/pollilib/index.js';
+import { createPollinationsClient } from './pollinations-client.js';
 import {
   createFallbackModel,
   matchesModelIdentifier,
@@ -74,7 +69,7 @@ runs, briefly describe what you created. Otherwise, reply conversationally.
 Keep responses concise, friendly, and helpful.
 `;
 
-const client = new PolliClient();
+let client = null;
 
 function createSystemMessage() {
   return { role: 'system', content: SYSTEM_PROMPT };
@@ -134,6 +129,13 @@ const els = {
   voicePlayback: document.querySelector('#voicePlayback'),
 };
 
+els.modelSelect.disabled = true;
+els.voiceSelect.disabled = true;
+if (els.voicePlayback) {
+  els.voicePlayback.disabled = true;
+  els.voicePlayback.checked = false;
+}
+
 const state = {
   conversation: [createSystemMessage()],
   messages: [],
@@ -182,6 +184,27 @@ function setLoading(isLoading) {
   if (!isLoading) {
     resetStatusIfIdle();
   }
+}
+
+function disableApplicationControls() {
+  const controls = [
+    els.sendButton,
+    els.voiceButton,
+    els.input,
+    els.modelSelect,
+    els.voiceSelect,
+    els.voicePlayback,
+  ];
+  for (const control of controls) {
+    if (control) {
+      control.disabled = true;
+    }
+  }
+  if (els.voicePlayback) {
+    els.voicePlayback.checked = false;
+  }
+  state.voicePlayback = false;
+  els.form.classList.remove('loading');
 }
 
 function addMessage(message) {
@@ -369,6 +392,9 @@ async function sendPrompt(prompt) {
   if (!selectedModel) {
     throw new Error('No model selected.');
   }
+  if (!client) {
+    throw new Error('Pollinations client is not ready.');
+  }
   const endpoints = buildEndpointSequence(selectedModel);
   if (!endpoints.length) {
     throw new Error(`No endpoints available for model "${selectedModel.label ?? selectedModel.id}".`);
@@ -516,6 +542,9 @@ async function handleToolCalls(toolCalls) {
 async function generateImageAsset(prompt, { width, height, model: imageModel } = {}) {
   setStatus('Generating image…');
   try {
+    if (!client) {
+      throw new Error('Pollinations client is not ready.');
+    }
     const binary = await image(
       prompt,
       {
@@ -589,6 +618,7 @@ function populateModels(models) {
     option.dataset.modelId = model.id;
     els.modelSelect.appendChild(option);
   }
+  els.modelSelect.disabled = false;
   const preferred = models.find(model => matchesModelIdentifier('openai', model)) ?? models[0];
   if (preferred) {
     els.modelSelect.value = preferred.id;
@@ -600,10 +630,16 @@ function populateVoices(voices) {
   if (!voices.length) {
     els.voiceSelect.disabled = true;
     els.voicePlayback.checked = false;
+    if (els.voicePlayback) {
+      els.voicePlayback.disabled = true;
+    }
     state.voicePlayback = false;
     return;
   }
   els.voiceSelect.disabled = false;
+  if (els.voicePlayback) {
+    els.voicePlayback.disabled = false;
+  }
   for (const voice of voices) {
     const option = document.createElement('option');
     option.value = voice;
@@ -861,6 +897,44 @@ function stopRecognition() {
   }
 }
 
+async function initializeApp() {
+  setStatus('Configuring Pollinations client…');
+  setLoading(true);
+  els.modelSelect.disabled = true;
+  els.voiceSelect.disabled = true;
+  if (els.voicePlayback) {
+    els.voicePlayback.disabled = true;
+    els.voicePlayback.checked = false;
+  }
+
+  try {
+    const { client: polliClient, tokenSource } = await createPollinationsClient();
+    client = polliClient;
+    if (tokenSource) {
+      console.info('Pollinations token loaded via %s.', tokenSource);
+    }
+  } catch (error) {
+    console.error('Failed to configure Pollinations client', error);
+    setLoading(false);
+    disableApplicationControls();
+    const message = error?.message ?? 'Unable to configure Pollinations client.';
+    setStatus(message, { error: true });
+    return;
+  }
+
+  try {
+    await loadModels();
+  } finally {
+    setLoading(false);
+  }
+
+  try {
+    setupRecognition();
+  } catch (error) {
+    console.error('Failed to configure voice recognition', error);
+  }
+}
+
 els.form.addEventListener('submit', async event => {
   event.preventDefault();
   const raw = els.input.value.trim();
@@ -952,10 +1026,11 @@ els.voicePlayback.addEventListener('change', () => {
   }, 1500);
 });
 
-loadModels().then(() => {
-  setupRecognition();
-}).catch(error => {
+initializeApp().catch(error => {
   console.error('Failed to initialise application', error);
+  disableApplicationControls();
+  const message = error?.message ?? 'Unable to initialise application.';
+  setStatus(message, { error: true });
 });
 
 window.addEventListener('beforeunload', () => {

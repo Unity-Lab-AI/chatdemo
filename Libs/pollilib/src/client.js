@@ -86,12 +86,9 @@ export class PolliClient {
       u.searchParams.set('referrer', auth.referrer);
     }
     if (includeToken && auth.mode === 'token') {
-      const placement = normalizePlacement(tokenPlacement ?? auth.placement);
-      if (placement !== 'query') {
-        throw new Error('Token can only be embedded into a URL when placement is "query"');
-      }
+      normalizePlacement(tokenPlacement ?? auth.placement);
       const token = await auth.getToken();
-      if (token) u.searchParams.set('token', token);
+      if (token) embedTokenIntoQuery(u, token);
     }
     return u.toString();
   }
@@ -225,11 +222,10 @@ async function applyAuthToGet(client, url, headers, includeReferrer) {
   if (auth.mode === 'token') {
     const token = await auth.getToken();
     if (!token) return;
+    embedTokenIntoQuery(url, token);
     const placement = normalizePlacement(auth.placement);
-    if (placement === 'header') {
-      if (!hasAuthHeader(headers)) headers['Authorization'] = `Bearer ${token}`;
-    } else {
-      if (!url.searchParams.has('token')) url.searchParams.set('token', token);
+    if (placement === 'header' && !hasAuthHeader(headers)) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
   }
 }
@@ -243,12 +239,18 @@ async function applyAuthToPost(client, url, headers, payload, includeReferrer) {
     const token = await auth.getToken();
     if (!token) return;
     const placement = normalizePlacement(auth.placement);
+    embedTokenIntoQuery(url, token);
     if (placement === 'header') {
       if (!hasAuthHeader(headers)) headers['Authorization'] = `Bearer ${token}`;
-    } else if (placement === 'query') {
-      if (!url.searchParams.has('token')) url.searchParams.set('token', token);
-    } else {
+    } else if (placement !== 'query') {
       if (payload.token == null) payload.token = token;
     }
+  }
+}
+
+function embedTokenIntoQuery(url, token) {
+  if (!url?.searchParams || token == null) return;
+  if (!url.searchParams.has('token')) {
+    url.searchParams.set('token', token);
   }
 }
