@@ -26,7 +26,8 @@ export async function run() {
     requests.push(entry);
     const method = entry.init.method ?? 'GET';
     if (method === 'POST') {
-      const model = entry.url.endsWith('/openai') ? 'openai' : 'unknown';
+      const body = entry.init.body ? JSON.parse(entry.init.body) : {};
+      const model = body.model ?? 'unknown';
       return new Response(createResponseBody(model), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -50,8 +51,10 @@ export async function run() {
   const seedResponse = await chat({ model: 'unity', endpoint: 'seed', messages }, client);
   assert.equal(seedResponse.model, 'unity');
   assert.equal(seedResponse.choices[0].message.content, 'Hello from Pollinations!');
-  assert.equal(requests[1].init.method, 'GET');
-  const seedUrl = new URL(requests[1].url);
-  assert.equal(seedUrl.searchParams.get('model'), 'unity');
-  assert(seedUrl.pathname.length > 1, 'Seed request should encode the prompt in the path');
+  assert.equal(requests[1].init.method, 'POST');
+  assert.ok(requests[1].url.endsWith('/openai'));
+  const parsedSeedBody = JSON.parse(requests[1].init.body);
+  assert.equal(parsedSeedBody.model, 'unity');
+  assert.equal(parsedSeedBody.endpoint, 'seed');
+  assert.deepEqual(parsedSeedBody.messages, messages);
 }
