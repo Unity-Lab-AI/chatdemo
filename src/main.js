@@ -62,19 +62,7 @@ const IMAGE_TOOL = {
   },
 };
 
-const SYSTEM_PROMPT = `
-You are a helpful assistant for Pollinations chats that can see the full conversation.
-When a user asks for an illustration—or when a visual would help—call the
-"generate_image" tool with a vivid prompt and any desired dimensions. After the tool
-runs, briefly describe what you created. Otherwise, reply conversationally.
-Keep responses concise, friendly, and helpful.
-`;
-
 let client = null;
-
-function createSystemMessage() {
-  return { role: 'system', content: SYSTEM_PROMPT };
-}
 
 const app = document.querySelector('#app');
 app.innerHTML = `
@@ -138,7 +126,7 @@ if (els.voicePlayback) {
 }
 
 const state = {
-  conversation: [createSystemMessage()],
+  conversation: [],
   messages: [],
   loading: false,
   models: [],
@@ -216,7 +204,7 @@ function addMessage(message) {
 }
 
 function resetConversation({ clearMessages = false } = {}) {
-  state.conversation = [createSystemMessage()];
+  state.conversation = [];
   state.activeModel = null;
   if (clearMessages) {
     state.messages = [];

@@ -26,7 +26,8 @@ export async function run() {
     requests.push(entry);
     const method = entry.init.method ?? 'GET';
     if (method === 'POST') {
-      const model = entry.url.endsWith('/openai') ? 'openai' : 'unknown';
+      const body = entry.init.body ? JSON.parse(entry.init.body) : {};
+      const model = body.model ?? 'unknown';
       return new Response(createResponseBody(model), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -41,17 +42,50 @@ export async function run() {
   const client = new PolliClient({ fetch: fakeFetch, textBase: 'https://text.pollinations.ai' });
   const messages = [{ role: 'user', content: 'Hi there!' }];
 
-  const defaultResponse = await chat({ model: 'openai', messages }, client);
+  const defaultResponse = await chat(
+    {
+      model: 'openai',
+      messages,
+      metadata: { session: 'abc123' },
+      user: 'tester-1',
+      parallel_tool_calls: false,
+      logit_bias: { 42: -1 },
+      jsonMode: true,
+    },
+    client,
+  );
   assert.equal(defaultResponse.model, 'openai');
   assert.equal(requests[0].init.method, 'POST');
   assert.ok(requests[0].url.endsWith('/openai'));
-  assert.equal(JSON.parse(requests[0].init.body).model, 'openai');
+  const defaultPayload = JSON.parse(requests[0].init.body);
+  assert.equal(defaultPayload.model, 'openai');
+  assert.equal(defaultPayload.endpoint, undefined);
+  assert.deepEqual(defaultPayload.metadata, { session: 'abc123' });
+  assert.equal(defaultPayload.user, 'tester-1');
+  assert.equal(defaultPayload.parallel_tool_calls, false);
+  assert.deepEqual(defaultPayload.logit_bias, { 42: -1 });
+  assert.deepEqual(defaultPayload.response_format, { type: 'json_object' });
+  assert.equal(defaultPayload.json, undefined);
 
-  const seedResponse = await chat({ model: 'unity', endpoint: 'seed', messages }, client);
+  const seedResponse = await chat(
+    {
+      model: 'unity',
+      endpoint: 'seed',
+      messages,
+      json: 'json_object',
+      reasoning: { effort: 'medium' },
+    },
+    client,
+  );
   assert.equal(seedResponse.model, 'unity');
   assert.equal(seedResponse.choices[0].message.content, 'Hello from Pollinations!');
-  assert.equal(requests[1].init.method, 'GET');
-  const seedUrl = new URL(requests[1].url);
-  assert.equal(seedUrl.searchParams.get('model'), 'unity');
-  assert(seedUrl.pathname.length > 1, 'Seed request should encode the prompt in the path');
+  assert.equal(requests[1].init.method, 'POST');
+  assert.ok(requests[1].url.endsWith('/openai'));
+  const parsedSeedBody = JSON.parse(requests[1].init.body);
+  assert.equal(parsedSeedBody.model, 'unity');
+  assert.equal(parsedSeedBody.endpoint, 'seed');
+  assert.deepEqual(parsedSeedBody.response_format, { type: 'json_object' });
+  assert.equal(parsedSeedBody.json, undefined);
+  assert.deepEqual(parsedSeedBody.reasoning, { effort: 'medium' });
+  assert.deepEqual(parsedSeedBody.messages, messages);
 }

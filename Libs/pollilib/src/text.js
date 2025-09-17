@@ -59,59 +59,41 @@ export async function text(prompt, options = {}, client = getDefaultClient()) {
   return await response.text();
 }
 
-export async function chat({
-  model,
-  messages,
-  seed,
-  temperature,
-  top_p,
-  presence_penalty,
-  frequency_penalty,
-  max_tokens,
-  stream,
-  private: priv,
-  tools,
-  tool_choice,
-  response_format,
-  timeoutMs,
-  endpoint,
-} = {}, client = getDefaultClient()) {
+export async function chat(options = {}, client = getDefaultClient()) {
+  const {
+    model,
+    messages,
+    stream,
+    endpoint,
+    timeoutMs,
+    private: priv,
+    jsonMode,
+    json,
+    response_format,
+    ...rest
+  } = options ?? {};
   if (!model) throw new Error('chat() requires a model');
   if (!Array.isArray(messages) || !messages.length) {
     throw new Error('chat() requires a non-empty messages array');
   }
   const targetEndpoint = resolveChatEndpoint(endpoint);
-  if (targetEndpoint === 'seed') {
-    return await performSeedChat(
-      {
-        model,
-        messages,
-        seed,
-        temperature,
-        top_p,
-        presence_penalty,
-        frequency_penalty,
-        max_tokens,
-        private: priv,
-        response_format,
-        timeoutMs,
-        stream,
-      },
-      client,
-    );
-  }
-  const url = `${client.textBase}/${encodeURIComponent(targetEndpoint)}`;
+  const url = `${client.textBase}/openai`;
   const body = { model, messages };
-  if (seed != null) body.seed = seed;
-  if (temperature != null) body.temperature = temperature;
-  if (top_p != null) body.top_p = top_p;
-  if (presence_penalty != null) body.presence_penalty = presence_penalty;
-  if (frequency_penalty != null) body.frequency_penalty = frequency_penalty;
-  if (max_tokens != null) body.max_tokens = max_tokens;
   if (priv != null) body.private = !!priv;
-  if (tools) body.tools = tools;
-  if (tool_choice) body.tool_choice = tool_choice;
-  if (response_format) body.response_format = response_format;
+  const { responseFormat, legacyJson } = resolveResponseFormat({ response_format, jsonMode, json });
+  if (responseFormat !== undefined) {
+    body.response_format = responseFormat;
+  }
+  if (legacyJson !== undefined) {
+    body.json = legacyJson;
+  }
+  for (const [key, value] of Object.entries(rest)) {
+    if (value === undefined) continue;
+    body[key] = value;
+  }
+  if (targetEndpoint && targetEndpoint !== 'openai') {
+    body.endpoint = targetEndpoint;
+  }
 
   if (stream) {
     body.stream = true;
@@ -162,149 +144,76 @@ function resolveChatEndpoint(endpoint) {
   return value || 'openai';
 }
 
-async function performSeedChat(
-  {
-    model,
-    messages,
-    seed,
-    temperature,
-    top_p,
-    presence_penalty,
-    frequency_penalty,
-    max_tokens,
-    private: priv,
-    response_format,
-    timeoutMs,
-    stream,
-  },
-  client,
-) {
-  if (stream) {
-    throw new Error('Seed endpoint currently does not support streaming responses.');
+function resolveResponseFormat({ response_format, jsonMode, json }) {
+  const normalized = normalizeResponseFormat(response_format);
+  if (normalized !== undefined) {
+    return { responseFormat: normalized, legacyJson: jsonForLegacy(json, normalized) };
   }
-  const prompt = buildSeedPrompt(messages);
-  const url = `${client.textBase}/${encodeURIComponent(prompt)}`;
-  const params = {};
-  if (model) params.model = model;
-  if (seed != null) params.seed = seed;
-  if (temperature != null) params.temperature = temperature;
-  if (top_p != null) params.top_p = top_p;
-  if (presence_penalty != null) params.presence_penalty = presence_penalty;
-  if (frequency_penalty != null) params.frequency_penalty = frequency_penalty;
-  if (max_tokens != null) params.max_tokens = max_tokens;
-  if (priv != null) params.private = boolString(priv);
+  if (jsonMode === true) {
+    return { responseFormat: { type: 'json_object' }, legacyJson: undefined };
+  }
+  const jsonAlias = normalizeJsonAlias(json);
+  if (jsonAlias.responseFormat !== undefined) {
+    return jsonAlias;
+  }
+  return { responseFormat: undefined, legacyJson: jsonAlias.legacyJson };
+}
 
-  let expectJson = false;
-  if (response_format) {
-    if (response_format === 'json_object') {
-      expectJson = true;
-    } else if (
-      typeof response_format === 'object' &&
-      response_format !== null &&
-      response_format.type === 'json_object'
-    ) {
-      expectJson = true;
+function normalizeResponseFormat(value) {
+  if (value == null) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (trimmed === 'json_object') {
+      return { type: 'json_object' };
+    }
+    return { type: trimmed };
+  }
+  if (typeof value === 'object') {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeJsonAlias(value) {
+  if (value == null) {
+    return { responseFormat: undefined, legacyJson: undefined };
+  }
+  if (value === true || value === 'true') {
+    return { responseFormat: { type: 'json_object' }, legacyJson: undefined };
+  }
+  if (value === false) {
+    return { responseFormat: undefined, legacyJson: undefined };
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return { responseFormat: undefined, legacyJson: undefined };
+    }
+    return { responseFormat: { type: trimmed }, legacyJson: undefined };
+  }
+  if (typeof value === 'object') {
+    return { responseFormat: value, legacyJson: undefined };
+  }
+  return { responseFormat: undefined, legacyJson: value };
+}
+
+function jsonForLegacy(value, responseFormat) {
+  if (value == null) return undefined;
+  if (value === true || value === 'true') return undefined;
+  if (!responseFormat) return value;
+  const responseType = typeof responseFormat === 'object' && responseFormat?.type ? String(responseFormat.type) : null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (responseType && trimmed.toLowerCase() === responseType.toLowerCase()) return undefined;
+    return value;
+  }
+  if (typeof value === 'object') {
+    if (value === responseFormat) return undefined;
+    if (value?.type && responseType && String(value.type).toLowerCase() === responseType.toLowerCase()) {
+      return undefined;
     }
   }
-  if (expectJson) params.json = 'true';
-
-  const response = await client.get(url, { params, timeoutMs });
-  await raiseForStatus(response, 'chat(seed)');
-  let bodyText = await response.text();
-  if (!expectJson) {
-    bodyText = bodyText ?? '';
-  }
-
-  const created = Math.floor(Date.now() / 1000);
-  const completionId = `pllns_${created.toString(36)}${Math.random().toString(36).slice(2)}`;
-  return {
-    id: completionId,
-    object: 'chat.completion',
-    created,
-    model: model ?? 'seed',
-    choices: [
-      {
-        index: 0,
-        finish_reason: 'stop',
-        message: {
-          role: 'assistant',
-          content: expectJson ? bodyText : String(bodyText ?? ''),
-        },
-      },
-    ],
-  };
-}
-
-function buildSeedPrompt(messages) {
-  const safeMessages = Array.isArray(messages) ? messages : [];
-  if (!safeMessages.length) {
-    throw new Error('chat(seed) requires at least one message.');
-  }
-  const lines = [];
-  for (const message of safeMessages) {
-    const roleLabel = describeRole(message?.role, message?.name);
-    const parts = [];
-    const content = extractChatContent(message?.content);
-    if (content) parts.push(content);
-    if (Array.isArray(message?.tool_calls) && message.tool_calls.length) {
-      for (const call of message.tool_calls) {
-        const description = formatToolCall(call);
-        if (description) parts.push(description);
-      }
-    }
-    lines.push(parts.length ? `${roleLabel}: ${parts.join('\n')}` : `${roleLabel}:`);
-  }
-  lines.push('Assistant:');
-  return lines.join('\n\n');
-}
-
-function describeRole(role, name) {
-  if (!role) return 'Message';
-  const normalized = String(role).trim().toLowerCase();
-  switch (normalized) {
-    case 'system':
-      return 'System';
-    case 'user':
-      return name ? `User (${name})` : 'User';
-    case 'assistant':
-      return 'Assistant';
-    case 'tool':
-      return name ? `Tool (${name})` : 'Tool';
-    default:
-      return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Message';
-  }
-}
-
-function extractChatContent(content) {
-  if (content == null) return '';
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map(entry => {
-        if (!entry) return '';
-        if (typeof entry === 'string') return entry;
-        if (typeof entry === 'object') {
-          if (entry.text != null) return String(entry.text);
-          if (entry.content != null) return String(entry.content);
-          if (entry.type === 'text' && entry.value != null) return String(entry.value);
-        }
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  if (typeof content === 'object') {
-    if (content.text != null) return String(content.text);
-    if (content.content != null) return String(content.content);
-  }
-  return String(content);
-}
-
-function formatToolCall(call) {
-  if (!call) return '';
-  try {
-    return `Tool call: ${JSON.stringify(call)}`;
-  } catch {
-    return 'Tool call: [unserializable]';
-  }
+  return value;
 }

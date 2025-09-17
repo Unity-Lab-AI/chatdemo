@@ -1,17 +1,33 @@
 import assert from 'node:assert/strict';
 import { PolliClient, chat } from '../Libs/pollilib/index.js';
 
-export const name = 'PolliLib chat() flattens conversations for the seed endpoint';
+export const name = 'PolliLib chat() posts payloads to /openai for the seed endpoint';
 
 export async function run() {
   const requests = [];
   const fakeFetch = async (url, init) => {
     const entry = { url: String(url), init: { ...(init ?? {}) } };
     requests.push(entry);
-    return new Response('Unity says hi!', {
-      status: 200,
-      headers: { 'Content-Type': 'text/plain' },
-    });
+    const body = entry.init.body ? JSON.parse(entry.init.body) : {};
+    return new Response(
+      JSON.stringify({
+        id: 'chatcmpl-seed',
+        object: 'chat.completion',
+        created: Date.now(),
+        model: body.model ?? 'unknown',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'Unity says hi!' },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   };
 
   const client = new PolliClient({ fetch: fakeFetch, textBase: 'https://text.pollinations.ai' });
@@ -29,14 +45,13 @@ export async function run() {
 
   assert.equal(requests.length, 1, 'Expected exactly one seed request');
   const request = requests[0];
-  assert.equal(request.init.method, 'GET');
+  assert.equal(request.init.method, 'POST');
 
   const url = new URL(request.url);
-  assert.equal(url.searchParams.get('model'), 'unity');
-  assert.equal(url.searchParams.get('temperature'), '0.2');
-
-  const prompt = decodeURIComponent(url.pathname.slice(1));
-  assert(prompt.includes('System: You are a helpful assistant.'), 'Prompt should include the system message');
-  assert(prompt.includes('User: Hello there!'), 'Prompt should include the user content');
-  assert(prompt.trim().endsWith('Assistant:'), 'Prompt should end with an assistant cue');
+  assert.ok(url.pathname.endsWith('/openai'), 'Seed requests should hit the /openai endpoint');
+  const payload = JSON.parse(request.init.body);
+  assert.equal(payload.model, 'unity');
+  assert.equal(payload.temperature, 0.2);
+  assert.equal(payload.endpoint, 'seed');
+  assert.deepEqual(payload.messages, messages);
 }
