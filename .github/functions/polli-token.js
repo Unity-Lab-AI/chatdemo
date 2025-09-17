@@ -1,5 +1,25 @@
+function readTokenFromEnvironment(context) {
+  const envSources = [];
+  if (context?.env) envSources.push(context.env);
+  if (typeof process !== 'undefined' && process?.env) envSources.push(process.env);
+
+  for (const env of envSources) {
+    const candidate =
+      env?.POLLI_TOKEN ??
+      env?.VITE_POLLI_TOKEN ??
+      env?.POLLINATIONS_TOKEN ??
+      env?.VITE_POLLINATIONS_TOKEN ??
+      null;
+    if (candidate != null) {
+      const value = String(candidate).trim();
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
 export async function onRequest(context) {
-  const token = context?.env?.POLLI_TOKEN ?? context?.env?.VITE_POLLI_TOKEN ?? null;
+  const token = readTokenFromEnvironment(context);
   if (!token) {
     return new Response(JSON.stringify({ error: 'Pollinations token is not configured.' }), {
       status: 404,
