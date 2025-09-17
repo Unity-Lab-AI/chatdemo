@@ -1,86 +1,88 @@
-import { text as textGet } from './text.js';
-import { image as imageGen } from './image.js';
-import { tts as ttsGen } from './audio.js';
-import { vision as visionAnalyze } from './vision.js';
+import { getDefaultClient } from './client.js';
+import { text } from './text.js';
+import { image } from './image.js';
+import { tts } from './audio.js';
+import { vision } from './vision.js';
 
-export class Context extends Map {}
+export class Context extends Map {
+  getOrDefault(key, fallback) {
+    return this.has(key) ? this.get(key) : fallback;
+  }
+}
 
 export class Pipeline {
-  constructor() {
-    this.steps = [];
+  constructor(steps = []) {
+    this._steps = steps.map(normalizeStep);
   }
 
-  step(step) {
-    this.steps.push(step);
+  use(step) {
+    this._steps.push(normalizeStep(step));
     return this;
   }
 
-  async execute({ client, context = new Context() } = {}) {
-    for (const step of this.steps) {
-      await step.run({ client, context });
+  async run({ client = getDefaultClient(), context } = {}) {
+    const ctx = context instanceof Context ? context : new Context(context ? Object.entries(context) : []);
+    for (const step of this._steps) {
+      await step({ client, context: ctx });
     }
-    return context;
+    return ctx;
   }
 }
 
-export class TextGetStep {
-  constructor({ prompt, outKey, params = {} }) {
-    this.prompt = prompt;
-    this.outKey = outKey;
-    this.params = params;
-  }
-
-  async run({ client, context }) {
-    const value = await textGet(this.prompt, this.params, client);
-    context.set(this.outKey, value);
-  }
+export function textStep({ prompt, storeAs, options = {} }) {
+  return async ({ client, context }) => {
+    const resolvedPrompt = resolveValue(prompt, context);
+    const result = await text(resolvedPrompt, resolveValue(options, context), client);
+    context.set(storeAs, result);
+  };
 }
 
-export class ImageStep {
-  constructor({ prompt, outKey, params = {} }) {
-    this.prompt = prompt;
-    this.outKey = outKey;
-    this.params = params;
-  }
-
-  async run({ client, context }) {
-    const binary = await imageGen(this.prompt, this.params, client);
-    context.set(this.outKey, {
-      binary,
-      mimeType: binary.mimeType,
-      base64: await binary.toBase64(),
-      dataUrl: binary.toDataUrl(),
+export function imageStep({ prompt, storeAs, options = {} }) {
+  return async ({ client, context }) => {
+    const resolvedPrompt = resolveValue(prompt, context);
+    const result = await image(resolvedPrompt, resolveValue(options, context), client);
+    context.set(storeAs, {
+      binary: result,
+      mimeType: result.mimeType,
+      size: result.size,
+      base64: await result.toBase64(),
+      dataUrl: result.toDataUrl(),
     });
-  }
+  };
 }
 
-export class TtsStep {
-  constructor({ text, outKey, params = {} }) {
-    this.text = text;
-    this.outKey = outKey;
-    this.params = params;
-  }
-
-  async run({ client, context }) {
-    const binary = await ttsGen(this.text, this.params, client);
-    context.set(this.outKey, {
-      binary,
-      mimeType: binary.mimeType,
-      base64: await binary.toBase64(),
-      dataUrl: binary.toDataUrl(),
+export function ttsStep({ text: input, storeAs, options = {} }) {
+  return async ({ client, context }) => {
+    const resolvedText = resolveValue(input, context);
+    const result = await tts(resolvedText, resolveValue(options, context), client);
+    context.set(storeAs, {
+      binary: result,
+      mimeType: result.mimeType,
+      size: result.size,
+      base64: await result.toBase64(),
+      dataUrl: result.toDataUrl(),
     });
-  }
+  };
 }
 
-export class VisionUrlStep {
-  constructor({ imageUrl, outKey, question, params = {} }) {
-    this.imageUrl = imageUrl;
-    this.outKey = outKey;
-    this.params = { question, ...params };
-  }
+export function visionStep({ storeAs, options = {} }) {
+  return async ({ client, context }) => {
+    const payload = resolveValue(options, context);
+    const result = await vision(payload, client);
+    context.set(storeAs, result);
+  };
+}
 
-  async run({ client, context }) {
-    const value = await visionAnalyze({ imageUrl: this.imageUrl, ...this.params }, client);
-    context.set(this.outKey, value);
+function normalizeStep(step) {
+  if (typeof step === 'function') {
+    return step;
   }
+  throw new Error('Pipeline steps must be functions');
+}
+
+function resolveValue(value, context) {
+  if (typeof value === 'function') {
+    return value(context);
+  }
+  return value;
 }
