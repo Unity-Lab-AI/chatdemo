@@ -14,6 +14,11 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     continue-on-error: true
+    env:
+      POLLI_TOKEN: ${{ coalesce(secrets.POLLI_TOKEN, secrets.VITE_POLLI_TOKEN, secrets.POLLINATIONS_TOKEN, secrets.VITE_POLLINATIONS_TOKEN) }}
+      VITE_POLLI_TOKEN: ${{ coalesce(secrets.VITE_POLLI_TOKEN, secrets.POLLI_TOKEN, secrets.VITE_POLLINATIONS_TOKEN, secrets.POLLINATIONS_TOKEN) }}
+      POLLINATIONS_TOKEN: ${{ coalesce(secrets.POLLINATIONS_TOKEN, secrets.POLLI_TOKEN, secrets.VITE_POLLINATIONS_TOKEN, secrets.VITE_POLLI_TOKEN) }}
+      VITE_POLLINATIONS_TOKEN: ${{ coalesce(secrets.VITE_POLLINATIONS_TOKEN, secrets.POLLINATIONS_TOKEN, secrets.VITE_POLLI_TOKEN, secrets.POLLI_TOKEN) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
