@@ -10,3 +10,4 @@ export * from './src/mcp.js';
 export * from './src/binary.js';
 export * from './src/errors.js';
 export * from './src/sse.js';
+export * from './src/defaults.js';

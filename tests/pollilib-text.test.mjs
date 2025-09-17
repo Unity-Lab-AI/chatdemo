@@ -36,6 +36,11 @@ export async function run() {
 
   assert.equal(response, 'Hello from Pollinations!');
   assert.equal(requests.length, 1, 'Expected the mock fetch to be invoked once');
-  assert.ok(requests[0].url.includes(encodeURIComponent(prompt)), 'The request URL should include the encoded prompt');
   assert.equal(requests[0].init.method, 'GET');
+  const url = new URL(requests[0].url);
+  assert.ok(url.pathname.endsWith('/openai'), 'Text requests should use the /openai endpoint');
+  assert.equal(url.searchParams.get('input'), prompt);
+  assert.equal(url.searchParams.get('model'), 'webgpt');
+  assert.equal(url.searchParams.get('seed'), '12345678');
+  assert.equal(url.searchParams.get('referer'), 'https://github.com/Unity-Lab-AI/chatdemo');
 }

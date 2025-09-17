@@ -1,4 +1,5 @@
 import { getDefaultClient } from './client.js';
+import { DEFAULT_MODEL, DEFAULT_SEED } from './defaults.js';
 import { sseEvents } from './sse.js';
 import { raiseForStatus } from './errors.js';
 
@@ -7,12 +8,14 @@ export async function text(prompt, options = {}, client = getDefaultClient()) {
   const { stream = false, timeoutMs, ...rest } = options ?? {};
 
   const params = buildTextParams(rest);
-  const url = `${client.textBase}/${encodeURIComponent(normalizedPrompt)}`;
+  if (!('input' in params)) {
+    params.input = normalizedPrompt;
+  }
+  const url = `${client.textBase}/openai`;
 
   if (stream) {
-    params.stream = 'true';
     const response = await client.get(url, {
-      params,
+      params: { ...params, stream: 'true' },
       headers: { Accept: 'text/event-stream' },
       timeoutMs: timeoutMs ?? 0,
     });
@@ -35,7 +38,7 @@ export async function text(prompt, options = {}, client = getDefaultClient()) {
 }
 
 export async function chat(options = {}, client = getDefaultClient()) {
-  const { body, stream, timeoutMs } = buildChatPayload(options);
+  const { body, stream, timeoutMs, query } = buildChatPayload(options);
   const url = `${client.textBase}/openai`;
 
   if (stream) {
@@ -43,6 +46,7 @@ export async function chat(options = {}, client = getDefaultClient()) {
     const response = await client.postJson(url, body, {
       headers: { Accept: 'text/event-stream' },
       timeoutMs: timeoutMs ?? 0,
+      params: query,
     });
     if (!response.ok) {
       await raiseForStatus(response, 'chat (stream)', { consumeBody: false });
@@ -57,7 +61,7 @@ export async function chat(options = {}, client = getDefaultClient()) {
     })();
   }
 
-  const response = await client.postJson(url, body, { timeoutMs });
+  const response = await client.postJson(url, body, { timeoutMs, params: query });
   await raiseForStatus(response, 'chat');
   return await response.json();
 }
@@ -140,10 +144,16 @@ function buildTextParams(options) {
   const params = {};
   const extras = { ...options };
 
-  assignIfPresent(params, 'model', extras.model);
+  const model = extras.model ?? DEFAULT_MODEL;
+  if (model) {
+    params.model = model;
+  }
   delete extras.model;
 
-  assignIfPresent(params, 'seed', extras.seed);
+  const seed = extras.seed ?? DEFAULT_SEED;
+  if (seed != null) {
+    params.seed = seed;
+  }
   delete extras.seed;
 
   assignIfPresent(params, 'temperature', pickFirst(extras, ['temperature']));
@@ -181,8 +191,13 @@ function buildTextParams(options) {
     delete extras.private;
   }
 
+  if ('referer' in extras && extras.referer) {
+    params.referer = extras.referer;
+    delete extras.referer;
+  }
+
   if ('referrer' in extras && extras.referrer) {
-    params.referrer = extras.referrer;
+    params.referer = params.referer ?? extras.referrer;
     delete extras.referrer;
   }
 
@@ -196,11 +211,15 @@ function buildTextParams(options) {
 
 function buildChatPayload(options = {}) {
   const extras = { ...options };
-  const model = extras.model;
+  const model = extras.model ?? DEFAULT_MODEL;
+  delete extras.model;
+
   if (!model) {
     throw new Error('chat() requires a model');
   }
-  delete extras.model;
+
+  const seed = extras.seed ?? DEFAULT_SEED;
+  delete extras.seed;
 
   const messages = normalizeMessages(extras.messages ?? [], extras.system ?? extras.systemPrompt);
   if (!messages.length) {
@@ -212,6 +231,10 @@ function buildChatPayload(options = {}) {
   delete extras.systemPrompt;
 
   const body = { model, messages };
+
+  if (seed != null) {
+    body.seed = seed;
+  }
 
   if ('private' in extras) {
     body.private = !!extras.private;
@@ -256,7 +279,15 @@ function buildChatPayload(options = {}) {
     body[key] = value;
   }
 
-  return { body, stream, timeoutMs };
+  const query = {};
+  if (model) {
+    query.model = model;
+  }
+  if (seed != null) {
+    query.seed = seed;
+  }
+
+  return { body, stream, timeoutMs, query };
 }
 
 function normalizeMessages(messages, systemPrompt) {

@@ -1,3 +1,5 @@
+import { DEFAULT_REFERRER } from './defaults.js';
+
 const DEFAULT_ENDPOINTS = {
   image: 'https://image.pollinations.ai',
   text: 'https://text.pollinations.ai',
@@ -307,7 +309,7 @@ function isBodyObject(value) {
 }
 
 function createAuthManager({ auth, referrer, token, tokenProvider } = {}) {
-  const fallbackReferrer = referrer ?? inferReferrer();
+  const fallbackReferrer = referrer ?? inferReferrer() ?? DEFAULT_REFERRER;
   if (auth) {
     if (auth.mode === 'none') {
       return new AuthManager({ mode: 'none', referrer: null, placement: 'header', getToken: async () => null });
@@ -374,12 +376,11 @@ class AuthManager {
 
   async apply({ method, url, headers, body, includeReferrer, includeToken, tokenPlacement }) {
     if (includeReferrer !== false && this.referrer) {
-      if ((method === 'GET' || method === 'HEAD') && !url.searchParams.has('referrer')) {
-        url.searchParams.set('referrer', this.referrer);
-      } else if (isBodyObject(body) && body.referrer == null) {
-        body.referrer = this.referrer;
-      } else if (!url.searchParams.has('referrer')) {
-        url.searchParams.set('referrer', this.referrer);
+      if (!url.searchParams.has('referer')) {
+        url.searchParams.set('referer', this.referrer);
+      }
+      if (isBodyObject(body) && body.referer == null) {
+        body.referer = this.referrer;
       }
     }
 
@@ -407,8 +408,8 @@ class AuthManager {
   }
 
   async decorateUrl(url, { includeReferrer = true, includeToken = false, tokenPlacement } = {}) {
-    if (includeReferrer && this.referrer && !url.searchParams.has('referrer')) {
-      url.searchParams.set('referrer', this.referrer);
+    if (includeReferrer && this.referrer && !url.searchParams.has('referer')) {
+      url.searchParams.set('referer', this.referrer);
     }
     if (includeToken && this.mode === 'token') {
       const token = await this.getToken();

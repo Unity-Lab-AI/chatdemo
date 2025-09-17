@@ -1,5 +1,5 @@
 import './style.css';
-import { chat, image, textModels, tts } from '../Libs/pollilib/index.js';
+import { chat, image, textModels, tts, DEFAULT_SEED } from '../Libs/pollilib/index.js';
 import { createPollinationsClient } from './pollinations-client.js';
 import {
   createFallbackModel,
@@ -7,7 +7,6 @@ import {
   normalizeTextCatalog,
 } from './model-catalog.js';
 import { doesResponseMatchModel, isMatchingModelName } from './model-matching.js';
-import { generateSeed } from './seed.js';
 
 const FALLBACK_MODELS = [
   createFallbackModel('openai', 'OpenAI GPT-5 Nano (fallback)'),
@@ -433,7 +432,6 @@ async function handleChatResponse(initialResponse, model, endpoint) {
           messages: state.conversation,
           tools: [IMAGE_TOOL],
           tool_choice: 'auto',
-          seed: generateSeed(),
         },
         client,
       );
@@ -540,14 +538,13 @@ async function generateImageAsset(prompt, { width, height, model: imageModel } =
     if (!client) {
       throw new Error('Pollinations client is not ready.');
     }
-    const seed = generateSeed();
+    const seed = DEFAULT_SEED;
     const binary = await image(
       prompt,
       {
         width,
         height,
         model: imageModel,
-        seed,
         nologo: true,
         private: true,
         enhance: true,
@@ -755,7 +752,6 @@ async function requestChatCompletion(model, endpoints) {
   const attemptErrors = [];
   for (const endpoint of endpoints) {
     try {
-      const requestSeed = generateSeed();
       const response = await chat(
         {
           model: model.id,
@@ -763,7 +759,6 @@ async function requestChatCompletion(model, endpoints) {
           messages: state.conversation,
           tools: [IMAGE_TOOL],
           tool_choice: 'auto',
-          seed: requestSeed,
         },
         client,
       );

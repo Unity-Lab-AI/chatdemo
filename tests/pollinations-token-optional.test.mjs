@@ -80,7 +80,8 @@ export async function run() {
     const { client, tokenSource, tokenMessages } = await createPollinationsClient();
 
     assert.equal(tokenSource, null);
-    assert.equal(client.authMode, 'none');
+    assert.equal(client.authMode, 'referrer');
+    assert.equal(client.referrer, 'https://www.unityailab.com');
     assert.ok(Array.isArray(tokenMessages));
     assert.equal(tokenMessages.length, 0, `Unexpected messages: ${tokenMessages.join('; ')}`);
     if (fetchCalled !== 0) {

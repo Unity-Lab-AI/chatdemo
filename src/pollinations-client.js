@@ -1,4 +1,4 @@
-import { PolliClient } from '../Libs/pollilib/index.js';
+import { PolliClient, DEFAULT_REFERRER } from '../Libs/pollilib/index.js';
 
 let tokenPromise = null;
 let cachedResult = null;
@@ -6,7 +6,7 @@ let cachedResult = null;
 export async function createPollinationsClient({ referrer } = {}) {
   const tokenResult = await ensureToken();
   const { token, source, messages = [], errors = [] } = tokenResult;
-  const inferredReferrer = referrer ?? inferReferrer();
+  const inferredReferrer = referrer ?? inferReferrer() ?? DEFAULT_REFERRER;
 
   const clientOptions = {};
   if (token) {
