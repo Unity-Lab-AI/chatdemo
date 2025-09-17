@@ -59,23 +59,19 @@ export async function text(prompt, options = {}, client = getDefaultClient()) {
   return await response.text();
 }
 
-export async function chat({
-  model,
-  messages,
-  seed,
-  temperature,
-  top_p,
-  presence_penalty,
-  frequency_penalty,
-  max_tokens,
-  stream,
-  private: priv,
-  tools,
-  tool_choice,
-  response_format,
-  timeoutMs,
-  endpoint,
-} = {}, client = getDefaultClient()) {
+export async function chat(options = {}, client = getDefaultClient()) {
+  const {
+    model,
+    messages,
+    stream,
+    endpoint,
+    timeoutMs,
+    private: priv,
+    jsonMode,
+    json,
+    response_format,
+    ...rest
+  } = options ?? {};
   if (!model) throw new Error('chat() requires a model');
   if (!Array.isArray(messages) || !messages.length) {
     throw new Error('chat() requires a non-empty messages array');
@@ -83,19 +79,21 @@ export async function chat({
   const targetEndpoint = resolveChatEndpoint(endpoint);
   const url = `${client.textBase}/openai`;
   const body = { model, messages };
+  if (priv != null) body.private = !!priv;
+  const { responseFormat, legacyJson } = resolveResponseFormat({ response_format, jsonMode, json });
+  if (responseFormat !== undefined) {
+    body.response_format = responseFormat;
+  }
+  if (legacyJson !== undefined) {
+    body.json = legacyJson;
+  }
+  for (const [key, value] of Object.entries(rest)) {
+    if (value === undefined) continue;
+    body[key] = value;
+  }
   if (targetEndpoint && targetEndpoint !== 'openai') {
     body.endpoint = targetEndpoint;
   }
-  if (seed != null) body.seed = seed;
-  if (temperature != null) body.temperature = temperature;
-  if (top_p != null) body.top_p = top_p;
-  if (presence_penalty != null) body.presence_penalty = presence_penalty;
-  if (frequency_penalty != null) body.frequency_penalty = frequency_penalty;
-  if (max_tokens != null) body.max_tokens = max_tokens;
-  if (priv != null) body.private = !!priv;
-  if (tools) body.tools = tools;
-  if (tool_choice) body.tool_choice = tool_choice;
-  if (response_format) body.response_format = response_format;
 
   if (stream) {
     body.stream = true;
@@ -144,4 +142,78 @@ function resolveChatEndpoint(endpoint) {
   }
   value = value.replace(/^\/+/u, '').replace(/\/+$/u, '').toLowerCase();
   return value || 'openai';
+}
+
+function resolveResponseFormat({ response_format, jsonMode, json }) {
+  const normalized = normalizeResponseFormat(response_format);
+  if (normalized !== undefined) {
+    return { responseFormat: normalized, legacyJson: jsonForLegacy(json, normalized) };
+  }
+  if (jsonMode === true) {
+    return { responseFormat: { type: 'json_object' }, legacyJson: undefined };
+  }
+  const jsonAlias = normalizeJsonAlias(json);
+  if (jsonAlias.responseFormat !== undefined) {
+    return jsonAlias;
+  }
+  return { responseFormat: undefined, legacyJson: jsonAlias.legacyJson };
+}
+
+function normalizeResponseFormat(value) {
+  if (value == null) return undefined;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (trimmed === 'json_object') {
+      return { type: 'json_object' };
+    }
+    return { type: trimmed };
+  }
+  if (typeof value === 'object') {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeJsonAlias(value) {
+  if (value == null) {
+    return { responseFormat: undefined, legacyJson: undefined };
+  }
+  if (value === true || value === 'true') {
+    return { responseFormat: { type: 'json_object' }, legacyJson: undefined };
+  }
+  if (value === false) {
+    return { responseFormat: undefined, legacyJson: undefined };
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return { responseFormat: undefined, legacyJson: undefined };
+    }
+    return { responseFormat: { type: trimmed }, legacyJson: undefined };
+  }
+  if (typeof value === 'object') {
+    return { responseFormat: value, legacyJson: undefined };
+  }
+  return { responseFormat: undefined, legacyJson: value };
+}
+
+function jsonForLegacy(value, responseFormat) {
+  if (value == null) return undefined;
+  if (value === true || value === 'true') return undefined;
+  if (!responseFormat) return value;
+  const responseType = typeof responseFormat === 'object' && responseFormat?.type ? String(responseFormat.type) : null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (responseType && trimmed.toLowerCase() === responseType.toLowerCase()) return undefined;
+    return value;
+  }
+  if (typeof value === 'object') {
+    if (value === responseFormat) return undefined;
+    if (value?.type && responseType && String(value.type).toLowerCase() === responseType.toLowerCase()) {
+      return undefined;
+    }
+  }
+  return value;
 }
