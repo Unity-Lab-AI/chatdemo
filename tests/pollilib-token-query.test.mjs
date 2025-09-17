@@ -60,9 +60,13 @@ export async function run() {
   const requestUrl = new URL(request.url);
   assert.ok(requestUrl.pathname.endsWith('/openai'));
   assert.equal(requestUrl.searchParams.get('token'), 'example-token');
+  assert.equal(requestUrl.searchParams.get('model'), 'unity');
+  assert.equal(requestUrl.searchParams.get('seed'), '12345678');
+  assert.equal(requestUrl.searchParams.get('referer'), 'https://www.unityailab.com');
   const authHeader = request.init.headers?.Authorization ?? request.init.headers?.authorization;
   assert.equal(authHeader, 'Bearer example-token');
   const payload = JSON.parse(request.init.body);
   assert.equal(payload.endpoint, 'seed');
+  assert.equal(payload.seed, '12345678');
   assert.deepEqual(payload.messages, messages);
 }

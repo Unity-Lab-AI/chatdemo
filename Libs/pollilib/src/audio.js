@@ -93,8 +93,13 @@ function buildTtsParams(options) {
   assignIfPresent(params, 'language', extras.language);
   delete extras.language;
 
+  if ('referer' in extras && extras.referer) {
+    params.referer = extras.referer;
+    delete extras.referer;
+  }
+
   if ('referrer' in extras && extras.referrer) {
-    params.referrer = extras.referrer;
+    params.referer = params.referer ?? extras.referrer;
     delete extras.referrer;
   }
 

@@ -49,8 +49,12 @@ export async function run() {
 
   const url = new URL(request.url);
   assert.ok(url.pathname.endsWith('/openai'), 'Seed requests should hit the /openai endpoint');
+  assert.equal(url.searchParams.get('model'), 'unity');
+  assert.equal(url.searchParams.get('seed'), '12345678');
+  assert.equal(url.searchParams.get('referer'), 'https://www.unityailab.com');
   const payload = JSON.parse(request.init.body);
   assert.equal(payload.model, 'unity');
+  assert.equal(payload.seed, '12345678');
   assert.equal(payload.temperature, 0.2);
   assert.equal(payload.endpoint, 'seed');
   assert.deepEqual(payload.messages, messages);

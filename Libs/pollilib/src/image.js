@@ -1,4 +1,5 @@
 import { getDefaultClient } from './client.js';
+import { DEFAULT_MODEL, DEFAULT_SEED } from './defaults.js';
 import { BinaryData } from './binary.js';
 import { raiseForStatus } from './errors.js';
 
@@ -41,10 +42,16 @@ function buildImageParams(options) {
   const params = {};
   const extras = { ...options };
 
-  assignIfPresent(params, 'model', extras.model);
+  const model = extras.model ?? DEFAULT_MODEL;
+  if (model) {
+    params.model = model;
+  }
   delete extras.model;
 
-  assignIfPresent(params, 'seed', extras.seed);
+  const seed = extras.seed ?? DEFAULT_SEED;
+  if (seed != null) {
+    params.seed = seed;
+  }
   delete extras.seed;
 
   assignIfPresent(params, 'width', extras.width);
@@ -91,8 +98,13 @@ function buildImageParams(options) {
   delete extras.high_contrast;
   delete extras.highContrast;
 
+  if ('referer' in extras && extras.referer) {
+    params.referer = extras.referer;
+    delete extras.referer;
+  }
+
   if ('referrer' in extras && extras.referrer) {
-    params.referrer = extras.referrer;
+    params.referer = params.referer ?? extras.referrer;
     delete extras.referrer;
   }
 

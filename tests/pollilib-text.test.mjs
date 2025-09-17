@@ -36,6 +36,27 @@ export async function run() {
 
   assert.equal(response, 'Hello from Pollinations!');
   assert.equal(requests.length, 1, 'Expected the mock fetch to be invoked once');
-  assert.ok(requests[0].url.includes(encodeURIComponent(prompt)), 'The request URL should include the encoded prompt');
   assert.equal(requests[0].init.method, 'GET');
+  const url = new URL(requests[0].url);
+  assert.ok(url.pathname.endsWith('/openai'), 'Text requests should use the /openai endpoint');
+  assert.equal(url.searchParams.get('input'), prompt);
+  assert.equal(url.searchParams.get('model'), 'webgpt');
+  assert.equal(url.searchParams.get('seed'), '12345678');
+  assert.equal(url.searchParams.get('referer'), 'https://github.com/Unity-Lab-AI/chatdemo');
+
+  requests.length = 0;
+  const defaultClient = new PolliClient({ fetch: fakeFetch });
+  const defaultPrompt = 'Hello Unity';
+  await text(defaultPrompt, undefined, defaultClient);
+
+  assert.equal(requests.length, 1, 'Default client should issue a single request');
+  const defaultRequest = requests[0];
+  assert.equal(defaultRequest.init.method, 'GET');
+  const defaultUrl = new URL(defaultRequest.url);
+  assert.ok(defaultUrl.pathname.endsWith('/openai'), 'Default client should target /openai');
+  assert.equal(defaultUrl.searchParams.get('input'), defaultPrompt);
+  assert.equal(defaultUrl.searchParams.get('model'), 'unity');
+  assert.equal(defaultUrl.searchParams.get('seed'), '12345678');
+  assert.equal(defaultUrl.searchParams.get('referer'), 'https://www.unityailab.com');
+  assert.equal(defaultUrl.searchParams.get('token'), 'POLLI_TOKEN');
 }
