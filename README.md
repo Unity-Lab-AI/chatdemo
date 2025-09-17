@@ -42,5 +42,9 @@ expects the token to be provided at runtime so it is never bundled into the stat
 - **Local development** – Either define `POLLI_TOKEN`/`VITE_POLLI_TOKEN` in your shell when running
   `npm run dev`, add a `<meta name="pollinations-token" ...>` tag to `index.html`, or inject
   `window.__POLLINATIONS_TOKEN__` before the application bootstraps.
+- **Static overrides** – When a dynamic endpoint is unavailable, append a `token` query parameter
+  to the page URL (e.g. `https://example.github.io/chatdemo/?token=your-secret`). The application
+  will capture the token, remove it from the visible URL, and apply it to subsequent Pollinations
+  requests.
 
 If the token cannot be resolved the UI remains disabled and an error is shown in the status banner.
