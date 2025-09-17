@@ -32,7 +32,13 @@ async function ensureToken() {
 }
 
 async function resolveToken() {
-  const attempts = [fetchTokenFromApi, readTokenFromMeta, readTokenFromWindow, readTokenFromEnv];
+  const attempts = [
+    readTokenFromUrl,
+    readTokenFromMeta,
+    readTokenFromWindow,
+    readTokenFromEnv,
+    fetchTokenFromApi,
+  ];
   const errors = [];
 
   for (const attempt of attempts) {
@@ -99,6 +105,40 @@ async function fetchTokenFromApi() {
   } catch (error) {
     return { token: null, source: 'api', error };
   }
+}
+
+function readTokenFromUrl() {
+  const location = getCurrentLocation();
+  if (!location) {
+    return { token: null, source: 'url', error: new Error('Location is unavailable.') };
+  }
+
+  const { url, searchParams, hashParams, rawFragments } = parseLocation(location);
+  const tokenKeys = new Set();
+  const candidates = [];
+
+  collectTokenCandidates(searchParams, tokenKeys, candidates);
+  collectTokenCandidates(hashParams, tokenKeys, candidates);
+
+  if (candidates.length === 0 && rawFragments.length > 0) {
+    const regex = /(token[^=:#/?&]*)([:=])([^#&/?]+)/gi;
+    for (const fragment of rawFragments) {
+      let match;
+      while ((match = regex.exec(fragment))) {
+        tokenKeys.add(match[1]);
+        candidates.push(match[3]);
+      }
+    }
+  }
+
+  const token = extractTokenValue(candidates);
+  if (!token) {
+    return { token: null, source: 'url' };
+  }
+
+  sanitizeUrlToken(location, url, tokenKeys);
+
+  return { token, source: 'url' };
 }
 
 function readTokenFromMeta() {
@@ -168,6 +208,156 @@ function readTokenFromEnv() {
     return { token: null, source: 'env' };
   }
   return { token, source: 'env' };
+}
+
+function getCurrentLocation() {
+  if (typeof window !== 'undefined' && window?.location) {
+    return window.location;
+  }
+  if (typeof globalThis !== 'undefined' && globalThis?.location) {
+    return globalThis.location;
+  }
+  return null;
+}
+
+function parseLocation(location) {
+  const result = {
+    url: null,
+    searchParams: new URLSearchParams(),
+    hashParams: new URLSearchParams(),
+    rawFragments: [],
+  };
+
+  let baseHref = '';
+  if (typeof location.href === 'string' && location.href) {
+    baseHref = location.href;
+  } else {
+    const origin = typeof location.origin === 'string' ? location.origin : 'http://localhost';
+    const path = typeof location.pathname === 'string' ? location.pathname : '/';
+    const search = typeof location.search === 'string' ? location.search : '';
+    const hash = typeof location.hash === 'string' ? location.hash : '';
+    baseHref = `${origin.replace(/\/?$/, '')}${path.startsWith('/') ? path : `/${path}`}${search}${hash}`;
+  }
+
+  try {
+    const base = typeof location.origin === 'string' && location.origin ? location.origin : undefined;
+    result.url = base ? new URL(baseHref, base) : new URL(baseHref);
+  } catch {
+    try {
+      result.url = new URL(baseHref, 'http://localhost');
+    } catch {
+      result.url = null;
+    }
+  }
+
+  if (result.url) {
+    result.searchParams = new URLSearchParams(result.url.searchParams);
+    const hash = typeof result.url.hash === 'string' ? result.url.hash.replace(/^#/, '') : '';
+    if (hash) {
+      result.hashParams = new URLSearchParams(hash);
+      result.rawFragments.push(hash);
+    }
+  } else {
+    const search = typeof location.search === 'string' ? location.search.replace(/^\?/, '') : '';
+    const hash = typeof location.hash === 'string' ? location.hash.replace(/^#/, '') : '';
+    result.searchParams = new URLSearchParams(search);
+    result.hashParams = new URLSearchParams(hash);
+    if (hash) {
+      result.rawFragments.push(hash);
+    }
+  }
+
+  const hrefFragment = typeof location.href === 'string' ? location.href : '';
+  if (hrefFragment) {
+    result.rawFragments.push(hrefFragment);
+  }
+
+  return result;
+}
+
+function collectTokenCandidates(params, tokenKeys, candidates) {
+  if (!params) return;
+  for (const key of params.keys()) {
+    if (typeof key !== 'string') continue;
+    if (!key.toLowerCase().includes('token')) continue;
+    tokenKeys.add(key);
+    const values = params.getAll(key);
+    for (const value of values) {
+      candidates.push(value);
+    }
+  }
+}
+
+function sanitizeUrlToken(location, url, tokenKeys) {
+  if (!location || !tokenKeys || tokenKeys.size === 0) {
+    return;
+  }
+
+  const effectiveUrl = url ?? parseLocation(location).url;
+  if (!effectiveUrl) {
+    return;
+  }
+
+  let modified = false;
+  for (const key of tokenKeys) {
+    if (effectiveUrl.searchParams.has(key)) {
+      effectiveUrl.searchParams.delete(key);
+      modified = true;
+    }
+  }
+
+  const originalHash = effectiveUrl.hash;
+  if (typeof originalHash === 'string' && originalHash.length > 1) {
+    const hashParams = new URLSearchParams(originalHash.slice(1));
+    let hashModified = false;
+    for (const key of tokenKeys) {
+      if (hashParams.has(key)) {
+        hashParams.delete(key);
+        hashModified = true;
+      }
+    }
+    if (hashModified) {
+      const nextHash = hashParams.toString();
+      effectiveUrl.hash = nextHash ? `#${nextHash}` : '';
+      modified = true;
+    }
+  }
+
+  if (!modified) {
+    return;
+  }
+
+  const history =
+    (typeof window !== 'undefined' && window?.history) ||
+    (typeof globalThis !== 'undefined' && globalThis?.history) ||
+    null;
+  const nextUrl = effectiveUrl.toString();
+
+  if (history?.replaceState) {
+    try {
+      history.replaceState(history.state ?? null, '', nextUrl);
+      return;
+    } catch {
+      // ignore history errors
+    }
+  }
+
+  if (typeof location.assign === 'function') {
+    try {
+      location.assign(nextUrl);
+      return;
+    } catch {
+      // ignore assignment errors
+    }
+  }
+
+  if ('href' in location) {
+    try {
+      location.href = nextUrl;
+    } catch {
+      // ignore inability to mutate href
+    }
+  }
 }
 
 function determineDevelopmentEnvironment(importMetaEnv, processEnv) {
