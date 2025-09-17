@@ -61,6 +61,7 @@ export async function run() {
   assert.equal(defaultUrl.searchParams.get('model'), 'openai');
   assert.equal(defaultUrl.searchParams.get('seed'), '12345678');
   assert.equal(defaultUrl.searchParams.get('referer'), 'https://www.unityailab.com');
+  assert.equal(defaultUrl.searchParams.get('token'), 'POLLI_TOKEN');
   const defaultPayload = JSON.parse(requests[0].init.body);
   assert.equal(defaultPayload.model, 'openai');
   assert.equal(defaultPayload.seed, '12345678');
@@ -90,6 +91,7 @@ export async function run() {
   assert.equal(seedUrl.searchParams.get('model'), 'unity');
   assert.equal(seedUrl.searchParams.get('seed'), '12345678');
   assert.equal(seedUrl.searchParams.get('referer'), 'https://www.unityailab.com');
+  assert.equal(seedUrl.searchParams.get('token'), 'POLLI_TOKEN');
   const parsedSeedBody = JSON.parse(requests[1].init.body);
   assert.equal(parsedSeedBody.model, 'unity');
   assert.equal(parsedSeedBody.seed, '12345678');

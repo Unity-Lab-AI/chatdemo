@@ -1,4 +1,4 @@
-import { PolliClient, DEFAULT_REFERRER } from '../Libs/pollilib/index.js';
+import { PolliClient, DEFAULT_REFERRER, DEFAULT_TOKEN } from '../Libs/pollilib/index.js';
 
 let tokenPromise = null;
 let cachedResult = null;
@@ -9,6 +9,10 @@ export async function createPollinationsClient({ referrer } = {}) {
   const inferredReferrer = referrer ?? inferReferrer() ?? DEFAULT_REFERRER;
 
   const clientOptions = {};
+  if (inferredReferrer) {
+    clientOptions.referrer = inferredReferrer;
+  }
+
   if (token) {
     clientOptions.auth = {
       mode: 'token',
@@ -16,14 +20,12 @@ export async function createPollinationsClient({ referrer } = {}) {
       getToken: async () => token,
       referrer: inferredReferrer ?? undefined,
     };
-  } else if (inferredReferrer) {
-    clientOptions.referrer = inferredReferrer;
   }
 
   const client = new PolliClient(clientOptions);
   return {
     client,
-    tokenSource: token ? source : null,
+    tokenSource: token ? source ?? null : null,
     tokenMessages: messages,
     tokenErrors: errors,
   };
@@ -81,6 +83,14 @@ async function resolveToken() {
   const messages = errors
     .map(entry => formatError(entry.source, entry.error))
     .filter(Boolean);
+  if (DEFAULT_TOKEN) {
+    return {
+      token: DEFAULT_TOKEN,
+      source: 'default',
+      errors,
+      messages,
+    };
+  }
   return {
     token: null,
     source: null,

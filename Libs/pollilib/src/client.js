@@ -1,4 +1,4 @@
-import { DEFAULT_REFERRER } from './defaults.js';
+import { DEFAULT_REFERRER, DEFAULT_TOKEN } from './defaults.js';
 
 const DEFAULT_ENDPOINTS = {
   image: 'https://image.pollinations.ai',
@@ -20,6 +20,20 @@ export class PolliClient {
       defaultHeaders = {},
     } = options ?? {};
 
+    let authOptions = auth;
+    let referrerOption = referrer;
+    let tokenOption = token;
+    let tokenProviderOption = tokenProvider;
+
+    if (!authOptions && !tokenOption && !tokenProviderOption) {
+      authOptions = {
+        mode: 'token',
+        placement: 'query',
+        token: DEFAULT_TOKEN,
+        referrer: referrerOption ?? undefined,
+      };
+    }
+
     const impl = fetchImpl ?? globalThis.fetch;
     if (typeof impl !== 'function') {
       throw new Error('PolliClient requires a fetch implementation');
@@ -36,7 +50,12 @@ export class PolliClient {
     this.textBase = resolvedBases.text;
     this.timeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60_000;
     this.defaultHeaders = normalizeHeaderBag(defaultHeaders);
-    this._auth = createAuthManager({ auth, referrer, token, tokenProvider });
+    this._auth = createAuthManager({
+      auth: authOptions,
+      referrer: referrerOption,
+      token: tokenOption,
+      tokenProvider: tokenProviderOption,
+    });
   }
 
   get authMode() {

@@ -43,4 +43,20 @@ export async function run() {
   assert.equal(url.searchParams.get('model'), 'webgpt');
   assert.equal(url.searchParams.get('seed'), '12345678');
   assert.equal(url.searchParams.get('referer'), 'https://github.com/Unity-Lab-AI/chatdemo');
+
+  requests.length = 0;
+  const defaultClient = new PolliClient({ fetch: fakeFetch });
+  const defaultPrompt = 'Hello Unity';
+  await text(defaultPrompt, undefined, defaultClient);
+
+  assert.equal(requests.length, 1, 'Default client should issue a single request');
+  const defaultRequest = requests[0];
+  assert.equal(defaultRequest.init.method, 'GET');
+  const defaultUrl = new URL(defaultRequest.url);
+  assert.ok(defaultUrl.pathname.endsWith('/openai'), 'Default client should target /openai');
+  assert.equal(defaultUrl.searchParams.get('input'), defaultPrompt);
+  assert.equal(defaultUrl.searchParams.get('model'), 'unity');
+  assert.equal(defaultUrl.searchParams.get('seed'), '12345678');
+  assert.equal(defaultUrl.searchParams.get('referer'), 'https://www.unityailab.com');
+  assert.equal(defaultUrl.searchParams.get('token'), 'POLLI_TOKEN');
 }
