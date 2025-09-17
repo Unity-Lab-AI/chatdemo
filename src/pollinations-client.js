@@ -145,21 +145,44 @@ function readTokenFromWindow() {
 }
 
 function readTokenFromEnv() {
-  if (!import.meta?.env?.DEV) {
+  const importMetaEnv = typeof import.meta !== 'undefined' ? import.meta.env ?? undefined : undefined;
+  const processEnv = typeof process !== 'undefined' && process?.env ? process.env : undefined;
+
+  const isDev = determineDevelopmentEnvironment(importMetaEnv, processEnv);
+  if (!isDev) {
     return { token: null, source: 'env' };
   }
-  const env = import.meta.env ?? {};
-  const candidate =
-    env.VITE_POLLI_TOKEN ??
-    env.POLLI_TOKEN ??
-    env.VITE_POLLINATIONS_TOKEN ??
-    env.POLLINATIONS_TOKEN ??
-    null;
-  const token = extractTokenValue(candidate);
+
+  const token = extractTokenValue([
+    importMetaEnv?.VITE_POLLI_TOKEN,
+    importMetaEnv?.POLLI_TOKEN,
+    importMetaEnv?.VITE_POLLINATIONS_TOKEN,
+    importMetaEnv?.POLLINATIONS_TOKEN,
+    processEnv?.VITE_POLLI_TOKEN,
+    processEnv?.POLLI_TOKEN,
+    processEnv?.VITE_POLLINATIONS_TOKEN,
+    processEnv?.POLLINATIONS_TOKEN,
+  ]);
+
   if (!token) {
     return { token: null, source: 'env' };
   }
   return { token, source: 'env' };
+}
+
+function determineDevelopmentEnvironment(importMetaEnv, processEnv) {
+  if (importMetaEnv && typeof importMetaEnv.DEV !== 'undefined') {
+    return !!importMetaEnv.DEV;
+  }
+  if (processEnv) {
+    if (typeof processEnv.VITE_DEV_SERVER_URL !== 'undefined') {
+      return true;
+    }
+    if (typeof processEnv.NODE_ENV !== 'undefined') {
+      return processEnv.NODE_ENV !== 'production';
+    }
+  }
+  return false;
 }
 
 function extractTokenValue(value) {
@@ -213,3 +236,14 @@ function inferReferrer() {
   }
   return null;
 }
+
+function resetTokenCache() {
+  tokenPromise = null;
+  cachedToken = null;
+  cachedSource = null;
+}
+
+export const __testing = {
+  resetTokenCache,
+  determineDevelopmentEnvironment,
+};
