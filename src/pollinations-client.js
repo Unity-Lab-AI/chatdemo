@@ -1,34 +1,49 @@
 import { PolliClient } from '../Libs/pollilib/index.js';
 
 let tokenPromise = null;
-let cachedToken = null;
-let cachedSource = null;
+let cachedResult = null;
 
 export async function createPollinationsClient({ referrer } = {}) {
-  const { token, source } = await ensureToken();
-  const getToken = async () => token;
-  const client = new PolliClient({
-    auth: {
+  const tokenResult = await ensureToken();
+  const { token, source, messages = [], errors = [] } = tokenResult;
+  const inferredReferrer = referrer ?? inferReferrer();
+
+  const clientOptions = {};
+  if (token) {
+    clientOptions.auth = {
       mode: 'token',
       placement: 'query',
-      getToken,
-      referrer: referrer ?? inferReferrer(),
-    },
-  });
-  return { client, tokenSource: source };
+      getToken: async () => token,
+      referrer: inferredReferrer ?? undefined,
+    };
+  } else if (inferredReferrer) {
+    clientOptions.referrer = inferredReferrer;
+  }
+
+  const client = new PolliClient(clientOptions);
+  return {
+    client,
+    tokenSource: token ? source : null,
+    tokenMessages: messages,
+    tokenErrors: errors,
+  };
 }
 
 async function ensureToken() {
-  if (cachedToken) {
-    return { token: cachedToken, source: cachedSource };
+  if (cachedResult) {
+    return cachedResult;
   }
   if (!tokenPromise) {
-    tokenPromise = resolveToken();
+    tokenPromise = resolveToken()
+      .then(result => {
+        cachedResult = result;
+        return result;
+      })
+      .finally(() => {
+        tokenPromise = null;
+      });
   }
-  const result = await tokenPromise;
-  cachedToken = result.token;
-  cachedSource = result.source;
-  return result;
+  return tokenPromise;
 }
 
 async function resolveToken() {
@@ -45,9 +60,14 @@ async function resolveToken() {
     try {
       const result = await attempt();
       if (result?.token) {
+        const messages = errors
+          .map(entry => formatError(entry.source, entry.error))
+          .filter(Boolean);
         return {
           token: result.token,
           source: result.source ?? attempt.name ?? 'unknown',
+          errors,
+          messages,
         };
       }
       if (result?.error) {
@@ -61,21 +81,24 @@ async function resolveToken() {
   const messages = errors
     .map(entry => formatError(entry.source, entry.error))
     .filter(Boolean);
-  const message =
-    messages.length > 0
-      ? `Unable to load Pollinations token. Attempts: ${messages.join('; ')}`
-      : 'Unable to load Pollinations token.';
-  const failure = new Error(message);
-  failure.causes = errors;
-  throw failure;
+  return {
+    token: null,
+    source: null,
+    errors,
+    messages,
+  };
 }
 
 async function fetchTokenFromApi() {
+  const endpoint = resolveTokenEndpoint();
+  if (!endpoint) {
+    return { token: null, source: 'api' };
+  }
   if (typeof fetch !== 'function') {
     return { token: null, source: 'api', error: new Error('Fetch is unavailable in this environment.') };
   }
   try {
-    const response = await fetch('/api/polli-token', {
+    const response = await fetch(endpoint, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -110,7 +133,7 @@ async function fetchTokenFromApi() {
 function readTokenFromUrl() {
   const location = getCurrentLocation();
   if (!location) {
-    return { token: null, source: 'url', error: new Error('Location is unavailable.') };
+    return { token: null, source: 'url' };
   }
 
   const { url, searchParams, hashParams, rawFragments } = parseLocation(location);
@@ -143,7 +166,7 @@ function readTokenFromUrl() {
 
 function readTokenFromMeta() {
   if (typeof document === 'undefined') {
-    return { token: null, source: 'meta', error: new Error('Document is unavailable.') };
+    return { token: null, source: 'meta' };
   }
   const meta = document.querySelector('meta[name="pollinations-token"]');
   if (!meta) {
@@ -164,7 +187,7 @@ function readTokenFromMeta() {
 
 function readTokenFromWindow() {
   if (typeof window === 'undefined') {
-    return { token: null, source: 'window', error: new Error('Window is unavailable.') };
+    return { token: null, source: 'window' };
   }
   const candidate = window.__POLLINATIONS_TOKEN__ ?? window.POLLI_TOKEN ?? null;
   const token = extractTokenValue(candidate);
@@ -188,26 +211,32 @@ function readTokenFromEnv() {
   const importMetaEnv = typeof import.meta !== 'undefined' ? import.meta.env ?? undefined : undefined;
   const processEnv = typeof process !== 'undefined' && process?.env ? process.env : undefined;
 
-  const isDev = determineDevelopmentEnvironment(importMetaEnv, processEnv);
-  if (!isDev) {
-    return { token: null, source: 'env' };
+  const sources = [];
+  if (importMetaEnv) {
+    sources.push([
+      importMetaEnv.VITE_POLLI_TOKEN,
+      importMetaEnv.POLLI_TOKEN,
+      importMetaEnv.VITE_POLLINATIONS_TOKEN,
+      importMetaEnv.POLLINATIONS_TOKEN,
+    ]);
+  }
+  if (processEnv) {
+    sources.push([
+      processEnv.VITE_POLLI_TOKEN,
+      processEnv.POLLI_TOKEN,
+      processEnv.VITE_POLLINATIONS_TOKEN,
+      processEnv.POLLINATIONS_TOKEN,
+    ]);
   }
 
-  const token = extractTokenValue([
-    importMetaEnv?.VITE_POLLI_TOKEN,
-    importMetaEnv?.POLLI_TOKEN,
-    importMetaEnv?.VITE_POLLINATIONS_TOKEN,
-    importMetaEnv?.POLLINATIONS_TOKEN,
-    processEnv?.VITE_POLLI_TOKEN,
-    processEnv?.POLLI_TOKEN,
-    processEnv?.VITE_POLLINATIONS_TOKEN,
-    processEnv?.POLLINATIONS_TOKEN,
-  ]);
-
-  if (!token) {
-    return { token: null, source: 'env' };
+  for (const group of sources) {
+    const token = extractTokenValue(group);
+    if (token) {
+      return { token, source: 'env' };
+    }
   }
-  return { token, source: 'env' };
+
+  return { token: null, source: 'env' };
 }
 
 function getCurrentLocation() {
@@ -360,19 +389,49 @@ function sanitizeUrlToken(location, url, tokenKeys) {
   }
 }
 
-function determineDevelopmentEnvironment(importMetaEnv, processEnv) {
-  if (importMetaEnv && typeof importMetaEnv.DEV !== 'undefined') {
-    return !!importMetaEnv.DEV;
+function resolveTokenEndpoint() {
+  const importMetaEnv = typeof import.meta !== 'undefined' ? import.meta.env ?? undefined : undefined;
+  const processEnv = typeof process !== 'undefined' && process?.env ? process.env : undefined;
+  const envCandidates = [
+    importMetaEnv?.VITE_POLLI_TOKEN_ENDPOINT,
+    importMetaEnv?.POLLI_TOKEN_ENDPOINT,
+    importMetaEnv?.VITE_POLLINATIONS_TOKEN_ENDPOINT,
+    importMetaEnv?.POLLINATIONS_TOKEN_ENDPOINT,
+    processEnv?.VITE_POLLI_TOKEN_ENDPOINT,
+    processEnv?.POLLI_TOKEN_ENDPOINT,
+    processEnv?.VITE_POLLINATIONS_TOKEN_ENDPOINT,
+    processEnv?.POLLINATIONS_TOKEN_ENDPOINT,
+  ];
+
+  const windowCandidates = [];
+  if (typeof window !== 'undefined') {
+    windowCandidates.push(
+      window.__POLLINATIONS_TOKEN_ENDPOINT__,
+      window.POLLI_TOKEN_ENDPOINT,
+      window.POLLINATIONS_TOKEN_ENDPOINT,
+    );
   }
-  if (processEnv) {
-    if (typeof processEnv.VITE_DEV_SERVER_URL !== 'undefined') {
-      return true;
-    }
-    if (typeof processEnv.NODE_ENV !== 'undefined') {
-      return processEnv.NODE_ENV !== 'production';
+
+  const metaCandidates = [];
+  if (typeof document !== 'undefined' && document?.querySelector) {
+    const names = ['pollinations-token-endpoint', 'polli-token-endpoint'];
+    for (const name of names) {
+      const meta = document.querySelector(`meta[name="${name}"]`);
+      if (!meta) continue;
+      const content = meta.getAttribute('content');
+      if (typeof content === 'string') {
+        metaCandidates.push(content);
+      }
     }
   }
-  return false;
+
+  const candidates = [...envCandidates, ...windowCandidates, ...metaCandidates];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
 }
 
 function extractTokenValue(value) {
@@ -380,6 +439,10 @@ function extractTokenValue(value) {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if (!trimmed) return null;
+    const lower = trimmed.toLowerCase();
+    if (lower === 'undefined' || lower === 'null') {
+      return null;
+    }
     if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
       try {
         return extractTokenValue(JSON.parse(trimmed));
@@ -429,11 +492,9 @@ function inferReferrer() {
 
 function resetTokenCache() {
   tokenPromise = null;
-  cachedToken = null;
-  cachedSource = null;
+  cachedResult = null;
 }
 
 export const __testing = {
   resetTokenCache,
-  determineDevelopmentEnvironment,
 };

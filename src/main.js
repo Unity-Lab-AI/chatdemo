@@ -6,6 +6,7 @@ import {
   matchesModelIdentifier,
   normalizeTextCatalog,
 } from './model-catalog.js';
+import { generateSeed } from './seed.js';
 
 const FALLBACK_MODELS = [
   createFallbackModel('openai', 'OpenAI GPT-5 Nano (fallback)'),
@@ -443,6 +444,7 @@ async function handleChatResponse(initialResponse, model, endpoint) {
           messages: state.conversation,
           tools: [IMAGE_TOOL],
           tool_choice: 'auto',
+          seed: generateSeed(),
         },
         client,
       );
@@ -499,7 +501,7 @@ async function handleToolCalls(toolCalls) {
     const caption = String(args.caption ?? prompt).trim() || prompt;
 
     try {
-      const { dataUrl } = await generateImageAsset(prompt, {
+      const { dataUrl, seed } = await generateImageAsset(prompt, {
         width,
         height,
         model: args.model,
@@ -520,6 +522,7 @@ async function handleToolCalls(toolCalls) {
           prompt,
           width,
           height,
+          seed,
         }),
       });
     } catch (error) {
@@ -545,12 +548,14 @@ async function generateImageAsset(prompt, { width, height, model: imageModel } =
     if (!client) {
       throw new Error('Pollinations client is not ready.');
     }
+    const seed = generateSeed();
     const binary = await image(
       prompt,
       {
         width,
         height,
         model: imageModel,
+        seed,
         nologo: true,
         private: true,
         enhance: true,
@@ -559,7 +564,7 @@ async function generateImageAsset(prompt, { width, height, model: imageModel } =
     );
     const dataUrl = binary.toDataUrl();
     resetStatusIfIdle();
-    return { dataUrl };
+    return { dataUrl, seed };
   } catch (error) {
     console.error('Image generation failed', error);
     throw error;
@@ -770,6 +775,7 @@ async function requestChatCompletion(model, endpoints) {
   const attemptErrors = [];
   for (const endpoint of endpoints) {
     try {
+      const requestSeed = generateSeed();
       const response = await chat(
         {
           model: model.id,
@@ -777,6 +783,7 @@ async function requestChatCompletion(model, endpoints) {
           messages: state.conversation,
           tools: [IMAGE_TOOL],
           tool_choice: 'auto',
+          seed: requestSeed,
         },
         client,
       );
@@ -907,11 +914,27 @@ async function initializeApp() {
     els.voicePlayback.checked = false;
   }
 
+  let tokenSource = null;
+  let tokenMessages = [];
+
   try {
-    const { client: polliClient, tokenSource } = await createPollinationsClient();
+    const {
+      client: polliClient,
+      tokenSource: resolvedTokenSource,
+      tokenMessages: resolvedTokenMessages,
+    } = await createPollinationsClient();
     client = polliClient;
+    tokenSource = resolvedTokenSource;
+    tokenMessages = Array.isArray(resolvedTokenMessages) ? resolvedTokenMessages : [];
     if (tokenSource) {
       console.info('Pollinations token loaded via %s.', tokenSource);
+    } else if (tokenMessages.length) {
+      console.warn(
+        'Proceeding without a Pollinations token. Attempts: %s',
+        tokenMessages.join('; '),
+      );
+    } else {
+      console.info('Proceeding without a Pollinations token.');
     }
   } catch (error) {
     console.error('Failed to configure Pollinations client', error);
@@ -926,6 +949,10 @@ async function initializeApp() {
     await loadModels();
   } finally {
     setLoading(false);
+  }
+
+  if (!tokenSource && !state.statusError) {
+    setStatus('Ready. Pollinations token not configured; only public models are available.');
   }
 
   try {
@@ -955,7 +982,7 @@ els.form.addEventListener('submit', async event => {
       if (!prompt) {
         throw new Error('Provide a prompt after /image');
       }
-      const { dataUrl } = await generateImageAsset(prompt);
+      const { dataUrl, seed } = await generateImageAsset(prompt);
       addMessage({
         role: 'assistant',
         type: 'image',
@@ -963,6 +990,7 @@ els.form.addEventListener('submit', async event => {
         alt: prompt,
         caption: prompt,
       });
+      console.info('Generated Pollinations image with seed %s.', seed);
       resetStatusIfIdle();
     } else {
       await sendPrompt(raw);
