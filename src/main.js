@@ -6,6 +6,7 @@ import {
   matchesModelIdentifier,
   normalizeTextCatalog,
 } from './model-catalog.js';
+import { doesResponseMatchModel, isMatchingModelName } from './model-matching.js';
 import { generateSeed } from './seed.js';
 
 const FALLBACK_MODELS = [
@@ -437,8 +438,11 @@ async function handleChatResponse(initialResponse, model, endpoint) {
         client,
       );
       if (response?.model && !isMatchingModelName(response.model, model)) {
+        const aliasMatch = doesResponseMatchModel(response, model);
         console.warn(
-          'Model mismatch detected after tool call. Expected %s, received %s.',
+          aliasMatch
+            ? 'Model mismatch detected after tool call. Expected %s, received %s. Proceeding based on alias metadata.'
+            : 'Model mismatch detected after tool call. Expected %s, received %s.',
           model.id,
           response?.model,
         );
@@ -739,18 +743,6 @@ function buildEndpointSequence(model) {
   return result;
 }
 
-function isMatchingModelName(value, model) {
-  if (!value && value !== 0) return false;
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized) return false;
-  const identifiers = model?.identifiers;
-  if (identifiers?.has?.(normalized)) return true;
-  if (normalized.includes('/')) {
-    const last = normalized.split('/').pop();
-    if (last && identifiers?.has?.(last)) return true;
-  }
-  return false;
-}
 
 async function requestChatCompletion(model, endpoints) {
   if (!model) {
@@ -775,7 +767,18 @@ async function requestChatCompletion(model, endpoints) {
         },
         client,
       );
-      if (!response?.model || isMatchingModelName(response.model, model)) {
+      if (!response?.model) {
+        return { response, endpoint };
+      }
+      if (isMatchingModelName(response.model, model)) {
+        return { response, endpoint };
+      }
+      if (doesResponseMatchModel(response, model)) {
+        console.warn(
+          'Model mismatch detected. Expected %s, received %s. Proceeding based on alias metadata.',
+          model.id,
+          response.model,
+        );
         return { response, endpoint };
       }
       attemptErrors.push(
