@@ -907,11 +907,27 @@ async function initializeApp() {
     els.voicePlayback.checked = false;
   }
 
+  let tokenSource = null;
+  let tokenMessages = [];
+
   try {
-    const { client: polliClient, tokenSource } = await createPollinationsClient();
+    const {
+      client: polliClient,
+      tokenSource: resolvedTokenSource,
+      tokenMessages: resolvedTokenMessages,
+    } = await createPollinationsClient();
     client = polliClient;
+    tokenSource = resolvedTokenSource;
+    tokenMessages = Array.isArray(resolvedTokenMessages) ? resolvedTokenMessages : [];
     if (tokenSource) {
       console.info('Pollinations token loaded via %s.', tokenSource);
+    } else if (tokenMessages.length) {
+      console.warn(
+        'Proceeding without a Pollinations token. Attempts: %s',
+        tokenMessages.join('; '),
+      );
+    } else {
+      console.info('Proceeding without a Pollinations token.');
     }
   } catch (error) {
     console.error('Failed to configure Pollinations client', error);
@@ -926,6 +942,10 @@ async function initializeApp() {
     await loadModels();
   } finally {
     setLoading(false);
+  }
+
+  if (!tokenSource && !state.statusError) {
+    setStatus('Ready. Pollinations token not configured; only public models are available.');
   }
 
   try {

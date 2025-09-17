@@ -1,34 +1,49 @@
 import { PolliClient } from '../Libs/pollilib/index.js';
 
 let tokenPromise = null;
-let cachedToken = null;
-let cachedSource = null;
+let cachedResult = null;
 
 export async function createPollinationsClient({ referrer } = {}) {
-  const { token, source } = await ensureToken();
-  const getToken = async () => token;
-  const client = new PolliClient({
-    auth: {
+  const tokenResult = await ensureToken();
+  const { token, source, messages = [], errors = [] } = tokenResult;
+  const inferredReferrer = referrer ?? inferReferrer();
+
+  const clientOptions = {};
+  if (token) {
+    clientOptions.auth = {
       mode: 'token',
       placement: 'query',
-      getToken,
-      referrer: referrer ?? inferReferrer(),
-    },
-  });
-  return { client, tokenSource: source };
+      getToken: async () => token,
+      referrer: inferredReferrer ?? undefined,
+    };
+  } else if (inferredReferrer) {
+    clientOptions.referrer = inferredReferrer;
+  }
+
+  const client = new PolliClient(clientOptions);
+  return {
+    client,
+    tokenSource: token ? source : null,
+    tokenMessages: messages,
+    tokenErrors: errors,
+  };
 }
 
 async function ensureToken() {
-  if (cachedToken) {
-    return { token: cachedToken, source: cachedSource };
+  if (cachedResult) {
+    return cachedResult;
   }
   if (!tokenPromise) {
-    tokenPromise = resolveToken();
+    tokenPromise = resolveToken()
+      .then(result => {
+        cachedResult = result;
+        return result;
+      })
+      .finally(() => {
+        tokenPromise = null;
+      });
   }
-  const result = await tokenPromise;
-  cachedToken = result.token;
-  cachedSource = result.source;
-  return result;
+  return tokenPromise;
 }
 
 async function resolveToken() {
@@ -45,9 +60,14 @@ async function resolveToken() {
     try {
       const result = await attempt();
       if (result?.token) {
+        const messages = errors
+          .map(entry => formatError(entry.source, entry.error))
+          .filter(Boolean);
         return {
           token: result.token,
           source: result.source ?? attempt.name ?? 'unknown',
+          errors,
+          messages,
         };
       }
       if (result?.error) {
@@ -61,13 +81,12 @@ async function resolveToken() {
   const messages = errors
     .map(entry => formatError(entry.source, entry.error))
     .filter(Boolean);
-  const message =
-    messages.length > 0
-      ? `Unable to load Pollinations token. Attempts: ${messages.join('; ')}`
-      : 'Unable to load Pollinations token.';
-  const failure = new Error(message);
-  failure.causes = errors;
-  throw failure;
+  return {
+    token: null,
+    source: null,
+    errors,
+    messages,
+  };
 }
 
 async function fetchTokenFromApi() {
@@ -429,8 +448,7 @@ function inferReferrer() {
 
 function resetTokenCache() {
   tokenPromise = null;
-  cachedToken = null;
-  cachedSource = null;
+  cachedResult = null;
 }
 
 export const __testing = {

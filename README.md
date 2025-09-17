@@ -47,4 +47,6 @@ expects the token to be provided at runtime so it is never bundled into the stat
   will capture the token, remove it from the visible URL, and apply it to subsequent Pollinations
   requests.
 
-If the token cannot be resolved the UI remains disabled and an error is shown in the status banner.
+If the token cannot be resolved the application continues without one so you can still browse public
+models. A warning is shown to indicate that gated Pollinations models will remain unavailable until a
+token is supplied.
