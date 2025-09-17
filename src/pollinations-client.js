@@ -90,11 +90,15 @@ async function resolveToken() {
 }
 
 async function fetchTokenFromApi() {
+  const endpoint = resolveTokenEndpoint();
+  if (!endpoint) {
+    return { token: null, source: 'api' };
+  }
   if (typeof fetch !== 'function') {
     return { token: null, source: 'api', error: new Error('Fetch is unavailable in this environment.') };
   }
   try {
-    const response = await fetch('/api/polli-token', {
+    const response = await fetch(endpoint, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -129,7 +133,7 @@ async function fetchTokenFromApi() {
 function readTokenFromUrl() {
   const location = getCurrentLocation();
   if (!location) {
-    return { token: null, source: 'url', error: new Error('Location is unavailable.') };
+    return { token: null, source: 'url' };
   }
 
   const { url, searchParams, hashParams, rawFragments } = parseLocation(location);
@@ -162,7 +166,7 @@ function readTokenFromUrl() {
 
 function readTokenFromMeta() {
   if (typeof document === 'undefined') {
-    return { token: null, source: 'meta', error: new Error('Document is unavailable.') };
+    return { token: null, source: 'meta' };
   }
   const meta = document.querySelector('meta[name="pollinations-token"]');
   if (!meta) {
@@ -183,7 +187,7 @@ function readTokenFromMeta() {
 
 function readTokenFromWindow() {
   if (typeof window === 'undefined') {
-    return { token: null, source: 'window', error: new Error('Window is unavailable.') };
+    return { token: null, source: 'window' };
   }
   const candidate = window.__POLLINATIONS_TOKEN__ ?? window.POLLI_TOKEN ?? null;
   const token = extractTokenValue(candidate);
@@ -392,6 +396,51 @@ function determineDevelopmentEnvironment(importMetaEnv, processEnv) {
     }
   }
   return false;
+}
+
+function resolveTokenEndpoint() {
+  const importMetaEnv = typeof import.meta !== 'undefined' ? import.meta.env ?? undefined : undefined;
+  const processEnv = typeof process !== 'undefined' && process?.env ? process.env : undefined;
+  const envCandidates = [
+    importMetaEnv?.VITE_POLLI_TOKEN_ENDPOINT,
+    importMetaEnv?.POLLI_TOKEN_ENDPOINT,
+    importMetaEnv?.VITE_POLLINATIONS_TOKEN_ENDPOINT,
+    importMetaEnv?.POLLINATIONS_TOKEN_ENDPOINT,
+    processEnv?.VITE_POLLI_TOKEN_ENDPOINT,
+    processEnv?.POLLI_TOKEN_ENDPOINT,
+    processEnv?.VITE_POLLINATIONS_TOKEN_ENDPOINT,
+    processEnv?.POLLINATIONS_TOKEN_ENDPOINT,
+  ];
+
+  const windowCandidates = [];
+  if (typeof window !== 'undefined') {
+    windowCandidates.push(
+      window.__POLLINATIONS_TOKEN_ENDPOINT__,
+      window.POLLI_TOKEN_ENDPOINT,
+      window.POLLINATIONS_TOKEN_ENDPOINT,
+    );
+  }
+
+  const metaCandidates = [];
+  if (typeof document !== 'undefined' && document?.querySelector) {
+    const names = ['pollinations-token-endpoint', 'polli-token-endpoint'];
+    for (const name of names) {
+      const meta = document.querySelector(`meta[name="${name}"]`);
+      if (!meta) continue;
+      const content = meta.getAttribute('content');
+      if (typeof content === 'string') {
+        metaCandidates.push(content);
+      }
+    }
+  }
+
+  const candidates = [...envCandidates, ...windowCandidates, ...metaCandidates];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
 }
 
 function extractTokenValue(value) {

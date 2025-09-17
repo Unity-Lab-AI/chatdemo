@@ -33,20 +33,21 @@ make sure the contents of `dist/` are deployed.
 
 ## Configuring the Pollinations token
 
-Pollinations models that require tiered access need a token on every request. The application now
-expects the token to be provided at runtime so it is never bundled into the static assets.
+Pollinations models that require tiered access expect the token to be supplied as a request
+parameter. The demo resolves the token at runtime so secrets are never baked into the static assets.
 
 - **GitHub Pages / production** – Provide the `POLLI_TOKEN` secret in the repository (or Pages
-  environment). The included Pages Function at `.github/functions/polli-token.js` exposes the token
-  at runtime via `/api/polli-token`, and responses are marked as non-cacheable.
-- **Local development** – Either define `POLLI_TOKEN`/`VITE_POLLI_TOKEN` in your shell when running
-  `npm run dev`, add a `<meta name="pollinations-token" ...>` tag to `index.html`, or inject
-  `window.__POLLINATIONS_TOKEN__` before the application bootstraps.
-- **Static overrides** – When a dynamic endpoint is unavailable, append a `token` query parameter
-  to the page URL (e.g. `https://example.github.io/chatdemo/?token=your-secret`). The application
-  will capture the token, remove it from the visible URL, and apply it to subsequent Pollinations
-  requests.
+  environment). You can surface the token to the client by setting `window.__POLLINATIONS_TOKEN__`,
+  defining a `<meta name="pollinations-token" content="...">` tag, or adding a `token=...` query
+  parameter to the published URL (e.g. `https://example.github.io/chatdemo/?token=your-secret`). The
+  token is removed from the visible URL after it is captured.
+- **Local development** – Define `POLLI_TOKEN`/`VITE_POLLI_TOKEN` in your shell when running
+  `npm run dev`, add a meta tag as above, or inject `window.__POLLINATIONS_TOKEN__` before the
+  application bootstraps.
+- **Optional runtime endpoint** – If you expose the token via a custom endpoint, configure its URL
+  with `POLLI_TOKEN_ENDPOINT`/`VITE_POLLI_TOKEN_ENDPOINT` (environment variables),
+  `window.__POLLINATIONS_TOKEN_ENDPOINT__`, or a `<meta name="pollinations-token-endpoint" ...>` tag.
+  When present, the client will fetch the token from that endpoint.
 
-If the token cannot be resolved the application continues without one so you can still browse public
-models. A warning is shown to indicate that gated Pollinations models will remain unavailable until a
-token is supplied.
+If the token cannot be resolved the application continues without one, allowing you to browse public
+models while gated Pollinations models remain unavailable until a token is supplied.
