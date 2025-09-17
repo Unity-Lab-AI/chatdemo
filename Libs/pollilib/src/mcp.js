@@ -1,7 +1,7 @@
 import { getDefaultClient } from './client.js';
-import { image as imageGen, imageModels as listImage } from './image.js';
-import { textModels as listText } from './text.js';
-import { tts as ttsGen } from './audio.js';
+import { image, imageModels, imageUrl } from './image.js';
+import { textModels } from './text.js';
+import { tts } from './audio.js';
 
 export function serverName() {
   return 'pollinations-multimodal-api';
@@ -13,83 +13,47 @@ export function toolDefinitions() {
     tools: [
       {
         name: 'generateImageUrl',
-        description: 'Generate an image and return its URL',
-        parameters: {
-          type: 'object',
-          properties: {
-            prompt: { type: 'string' },
-            model: { type: 'string' },
-            seed: { type: 'integer' },
-            width: { type: 'integer' },
-            height: { type: 'integer' },
-            nologo: { type: 'boolean' },
-            private: { type: 'boolean' },
-          },
-          required: ['prompt'],
-        },
+        description: 'Generate an image and return its signed URL',
+        parameters: imageParameters(),
       },
       {
         name: 'generateImage',
-        description: 'Generate an image and return base64',
-        parameters: {
-          type: 'object',
-          properties: {
-            prompt: { type: 'string' },
-            model: { type: 'string' },
-            seed: { type: 'integer' },
-            width: { type: 'integer' },
-            height: { type: 'integer' },
-          },
-          required: ['prompt'],
-        },
+        description: 'Generate an image and return base64 data',
+        parameters: imageParameters(),
       },
       {
         name: 'respondAudio',
         description: 'Generate text-to-speech audio and return base64',
-        parameters: {
-          type: 'object',
-          properties: {
-            text: { type: 'string' },
-            voice: { type: 'string' },
-            model: { type: 'string' },
-          },
-          required: ['text'],
-        },
+        parameters: audioParameters(),
       },
       {
         name: 'sayText',
         description: 'Alias for respondAudio',
-        parameters: {
-          type: 'object',
-          properties: {
-            text: { type: 'string' },
-            voice: { type: 'string' },
-            model: { type: 'string' },
-          },
-          required: ['text'],
-        },
+        parameters: audioParameters(),
       },
       {
         name: 'listImageModels',
         description: 'List available image models',
-        parameters: { type: 'object', properties: {} },
+        parameters: emptyParameters(),
       },
       {
         name: 'listTextModels',
-        description: 'List text & multimodal models',
-        parameters: { type: 'object', properties: {} },
+        description: 'List text and multimodal models',
+        parameters: emptyParameters(),
       },
       {
         name: 'listAudioVoices',
-        description: 'List available voices',
-        parameters: { type: 'object', properties: {} },
+        description: 'List available audio voices',
+        parameters: emptyParameters(),
       },
       {
         name: 'listModels',
         description: 'List models by kind',
         parameters: {
           type: 'object',
-          properties: { kind: { type: 'string', enum: ['image', 'text', 'audio'] } },
+          properties: {
+            kind: { type: 'string', enum: ['image', 'text', 'audio'] },
+          },
         },
       },
     ],
@@ -97,61 +61,51 @@ export function toolDefinitions() {
 }
 
 export async function generateImageUrl(client, params) {
-  ({ client, params } = ensureClientArgs(client, params));
-  if (!params?.prompt) throw new Error('generateImageUrl requires a prompt');
-  const baseUrl = `${client.imageBase}/prompt/${encodeURIComponent(params.prompt)}`;
-  const { prompt, ...rest } = params;
-  try {
-    return await client.getSignedUrl(baseUrl, { params: rest, includeToken: true });
-  } catch (err) {
-    if (String(err.message).includes('Token can only be embedded')) {
-      return await client.getSignedUrl(baseUrl, { params: rest, includeToken: false });
-    }
-    throw err;
-  }
+  const { resolvedClient, resolvedParams } = resolveClientArgs(client, params);
+  const { prompt, ...options } = resolvedParams;
+  if (!prompt) throw new Error('generateImageUrl requires a prompt');
+  return await imageUrl(prompt, options, resolvedClient);
 }
 
 export async function generateImageBase64(client, params) {
-  ({ client, params } = ensureClientArgs(client, params));
-  if (!params?.prompt) throw new Error('generateImage requires a prompt');
-  const data = await imageGen(params.prompt, params, client);
+  const { resolvedClient, resolvedParams } = resolveClientArgs(client, params);
+  const { prompt, ...options } = resolvedParams;
+  if (!prompt) throw new Error('generateImage requires a prompt');
+  const data = await image(prompt, options, resolvedClient);
   return await data.toBase64();
 }
 
 export async function listImageModels(client, params) {
-  ({ client } = ensureClientArgs(client, params));
-  return await listImage(client);
+  const { resolvedClient } = resolveClientArgs(client, params);
+  return await imageModels(resolvedClient);
 }
 
 export async function listTextModels(client, params) {
-  ({ client } = ensureClientArgs(client, params));
-  return await listText(client);
+  const { resolvedClient } = resolveClientArgs(client, params);
+  return await textModels(resolvedClient);
 }
 
 export async function listAudioVoices(client, params) {
-  ({ client } = ensureClientArgs(client, params));
-  const models = await listText(client);
-  return models?.['openai-audio']?.voices ?? [];
+  const { resolvedClient } = resolveClientArgs(client, params);
+  const models = await textModels(resolvedClient);
+  return extractAudioModels(models);
 }
 
 export async function listModels(client, params = {}) {
-  ({ client, params } = ensureClientArgs(client, params));
-  const kind = params?.kind;
+  const { resolvedClient, resolvedParams } = resolveClientArgs(client, params);
+  const kind = resolvedParams?.kind;
   if (kind === 'image') {
-    return await listImage(client);
+    return await imageModels(resolvedClient);
   }
-  const textModels = await listText(client);
-  if (kind === 'audio') {
-    return extractAudioModels(textModels);
-  }
+  const text = await textModels(resolvedClient);
   if (kind === 'text') {
-    return textModels;
+    return text;
   }
-  const [imageModels, audioModels] = await Promise.all([
-    listImage(client),
-    Promise.resolve(extractAudioModels(textModels)),
-  ]);
-  return { image: imageModels, text: textModels, audio: audioModels };
+  if (kind === 'audio') {
+    return extractAudioModels(text);
+  }
+  const [images, audio] = await Promise.all([imageModels(resolvedClient), Promise.resolve(extractAudioModels(text))]);
+  return { image: images, text, audio };
 }
 
 export async function respondAudio(client, params) {
@@ -159,22 +113,55 @@ export async function respondAudio(client, params) {
 }
 
 export async function sayText(client, params) {
-  ({ client, params } = ensureClientArgs(client, params));
-  if (!params?.text) throw new Error('sayText requires text');
-  const binary = await ttsGen(params.text, { voice: params.voice, model: params.model }, client);
+  const { resolvedClient, resolvedParams } = resolveClientArgs(client, params);
+  const { text: message, voice, model } = resolvedParams;
+  if (!message) throw new Error('sayText requires text');
+  const audio = await tts(message, { voice, model }, resolvedClient);
   return {
-    base64: await binary.toBase64(),
-    mimeType: binary.mimeType,
-    dataUrl: binary.toDataUrl(),
+    base64: await audio.toBase64(),
+    mimeType: audio.mimeType,
+    dataUrl: audio.toDataUrl(),
   };
+}
+
+function imageParameters() {
+  return {
+    type: 'object',
+    properties: {
+      prompt: { type: 'string' },
+      model: { type: 'string' },
+      seed: { type: 'integer' },
+      width: { type: 'integer' },
+      height: { type: 'integer' },
+      nologo: { type: 'boolean' },
+      private: { type: 'boolean' },
+    },
+    required: ['prompt'],
+  };
+}
+
+function audioParameters() {
+  return {
+    type: 'object',
+    properties: {
+      text: { type: 'string' },
+      voice: { type: 'string' },
+      model: { type: 'string' },
+    },
+    required: ['text'],
+  };
+}
+
+function emptyParameters() {
+  return { type: 'object', properties: {} };
 }
 
 function extractAudioModels(models) {
   const audio = {};
   if (!models || typeof models !== 'object') return audio;
   for (const [name, info] of Object.entries(models)) {
-    const hasVoices = info?.voices?.length;
-    const declaresAudio = info?.capabilities?.includes?.('audio');
+    const hasVoices = Array.isArray(info?.voices) && info.voices.length > 0;
+    const declaresAudio = Array.isArray(info?.capabilities) && info.capabilities.includes('audio');
     if (name.includes('audio') || hasVoices || declaresAudio) {
       audio[name] = info;
     }
@@ -182,12 +169,9 @@ function extractAudioModels(models) {
   return audio;
 }
 
-function ensureClientArgs(client, params) {
-  if (!params && (!client || typeof client.getSignedUrl !== 'function')) {
-    return { client: getDefaultClient(), params: client ?? {} };
+function resolveClientArgs(client, params) {
+  if (client && typeof client.getSignedUrl === 'function') {
+    return { resolvedClient: client, resolvedParams: params ?? {} };
   }
-  if (!client || typeof client.getSignedUrl !== 'function') {
-    return { client: getDefaultClient(), params: params ?? {} };
-  }
-  return { client, params: params ?? {} };
+  return { resolvedClient: getDefaultClient(), resolvedParams: client ?? {} };
 }
