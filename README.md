@@ -34,16 +34,19 @@ make sure the contents of `dist/` are deployed.
 ## Configuring the Pollinations token
 
 Pollinations models that require tiered access expect the token to be supplied as a request
-parameter. The demo resolves the token at runtime so secrets are never baked into the static assets.
+parameter. The demo can resolve the token at runtime (via URL parameters, meta tags, or injected
+globals) and also honours build-time environment variables when you want to bake the token into the
+bundle.
 
 - **GitHub Pages / production** – Provide the `POLLI_TOKEN` secret in the repository (or Pages
   environment). You can surface the token to the client by setting `window.__POLLINATIONS_TOKEN__`,
-  defining a `<meta name="pollinations-token" content="...">` tag, or adding a `token=...` query
-  parameter to the published URL (e.g. `https://example.github.io/chatdemo/?token=your-secret`). The
-  token is removed from the visible URL after it is captured.
+  defining a `<meta name="pollinations-token" content="...">` tag, adding a `token=...` query
+  parameter to the published URL (e.g. `https://example.github.io/chatdemo/?token=your-secret`), or
+  injecting `POLLI_TOKEN`/`VITE_POLLI_TOKEN` during the build so the token ships with the bundle.
+  The token is removed from the visible URL after it is captured.
 - **Local development** – Define `POLLI_TOKEN`/`VITE_POLLI_TOKEN` in your shell when running
   `npm run dev`, add a meta tag as above, or inject `window.__POLLINATIONS_TOKEN__` before the
-  application bootstraps.
+  application bootstraps. Build-time environment variables also work in development.
 - **Optional runtime endpoint** – If you expose the token via a custom endpoint, configure its URL
   with `POLLI_TOKEN_ENDPOINT`/`VITE_POLLI_TOKEN_ENDPOINT` (environment variables),
   `window.__POLLINATIONS_TOKEN_ENDPOINT__`, or a `<meta name="pollinations-token-endpoint" ...>` tag.
@@ -51,3 +54,6 @@ parameter. The demo resolves the token at runtime so secrets are never baked int
 
 If the token cannot be resolved the application continues without one, allowing you to browse public
 models while gated Pollinations models remain unavailable until a token is supplied.
+
+All chat and image requests automatically include a random eight-digit `seed` parameter so they
+match Pollinations' expected request format.

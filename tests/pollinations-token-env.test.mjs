@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createPollinationsClient, __testing } from '../src/pollinations-client.js';
 
-export const name = 'Pollinations client resolves tokens from development environment variables';
+export const name = 'Pollinations client resolves tokens from environment variables';
 
 function createStubResponse(status = 404) {
   return {
@@ -24,12 +24,16 @@ function createStubResponse(status = 404) {
 export async function run() {
   const originalFetch = globalThis.fetch;
   const originalToken = process.env.POLLI_TOKEN;
+  const originalViteToken = process.env.VITE_POLLI_TOKEN;
+  const originalVitePollinationsToken = process.env.VITE_POLLINATIONS_TOKEN;
   const originalNodeEnv = process.env.NODE_ENV;
 
   try {
     globalThis.fetch = async () => createStubResponse(404);
     process.env.POLLI_TOKEN = 'process-env-token';
-    process.env.NODE_ENV = 'development';
+    process.env.VITE_POLLI_TOKEN = 'undefined';
+    process.env.VITE_POLLINATIONS_TOKEN = 'null';
+    process.env.NODE_ENV = 'production';
     __testing.resetTokenCache();
 
     const { client, tokenSource } = await createPollinationsClient();
@@ -50,10 +54,18 @@ export async function run() {
       process.env.POLLI_TOKEN = originalToken;
     }
 
-    if (typeof originalNodeEnv === 'undefined') {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
+    const envKeys = [
+      ['POLLI_TOKEN', originalToken],
+      ['VITE_POLLI_TOKEN', originalViteToken],
+      ['VITE_POLLINATIONS_TOKEN', originalVitePollinationsToken],
+      ['NODE_ENV', originalNodeEnv],
+    ];
+    for (const [key, original] of envKeys) {
+      if (typeof original === 'undefined') {
+        delete process.env[key];
+      } else {
+        process.env[key] = original;
+      }
     }
 
     __testing.resetTokenCache();

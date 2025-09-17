@@ -68,6 +68,8 @@ export async function run() {
     for (const key of endpointEnvKeys) {
       delete process.env[key];
     }
+    process.env.POLLI_TOKEN = 'undefined';
+    process.env.VITE_POLLI_TOKEN = 'null';
     delete process.env.NODE_ENV;
     delete globalThis.__POLLINATIONS_TOKEN_ENDPOINT__;
     delete globalThis.POLLI_TOKEN_ENDPOINT;

@@ -211,26 +211,32 @@ function readTokenFromEnv() {
   const importMetaEnv = typeof import.meta !== 'undefined' ? import.meta.env ?? undefined : undefined;
   const processEnv = typeof process !== 'undefined' && process?.env ? process.env : undefined;
 
-  const isDev = determineDevelopmentEnvironment(importMetaEnv, processEnv);
-  if (!isDev) {
-    return { token: null, source: 'env' };
+  const sources = [];
+  if (importMetaEnv) {
+    sources.push([
+      importMetaEnv.VITE_POLLI_TOKEN,
+      importMetaEnv.POLLI_TOKEN,
+      importMetaEnv.VITE_POLLINATIONS_TOKEN,
+      importMetaEnv.POLLINATIONS_TOKEN,
+    ]);
+  }
+  if (processEnv) {
+    sources.push([
+      processEnv.VITE_POLLI_TOKEN,
+      processEnv.POLLI_TOKEN,
+      processEnv.VITE_POLLINATIONS_TOKEN,
+      processEnv.POLLINATIONS_TOKEN,
+    ]);
   }
 
-  const token = extractTokenValue([
-    importMetaEnv?.VITE_POLLI_TOKEN,
-    importMetaEnv?.POLLI_TOKEN,
-    importMetaEnv?.VITE_POLLINATIONS_TOKEN,
-    importMetaEnv?.POLLINATIONS_TOKEN,
-    processEnv?.VITE_POLLI_TOKEN,
-    processEnv?.POLLI_TOKEN,
-    processEnv?.VITE_POLLINATIONS_TOKEN,
-    processEnv?.POLLINATIONS_TOKEN,
-  ]);
-
-  if (!token) {
-    return { token: null, source: 'env' };
+  for (const group of sources) {
+    const token = extractTokenValue(group);
+    if (token) {
+      return { token, source: 'env' };
+    }
   }
-  return { token, source: 'env' };
+
+  return { token: null, source: 'env' };
 }
 
 function getCurrentLocation() {
@@ -383,21 +389,6 @@ function sanitizeUrlToken(location, url, tokenKeys) {
   }
 }
 
-function determineDevelopmentEnvironment(importMetaEnv, processEnv) {
-  if (importMetaEnv && typeof importMetaEnv.DEV !== 'undefined') {
-    return !!importMetaEnv.DEV;
-  }
-  if (processEnv) {
-    if (typeof processEnv.VITE_DEV_SERVER_URL !== 'undefined') {
-      return true;
-    }
-    if (typeof processEnv.NODE_ENV !== 'undefined') {
-      return processEnv.NODE_ENV !== 'production';
-    }
-  }
-  return false;
-}
-
 function resolveTokenEndpoint() {
   const importMetaEnv = typeof import.meta !== 'undefined' ? import.meta.env ?? undefined : undefined;
   const processEnv = typeof process !== 'undefined' && process?.env ? process.env : undefined;
@@ -448,6 +439,10 @@ function extractTokenValue(value) {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if (!trimmed) return null;
+    const lower = trimmed.toLowerCase();
+    if (lower === 'undefined' || lower === 'null') {
+      return null;
+    }
     if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
       try {
         return extractTokenValue(JSON.parse(trimmed));
@@ -502,5 +497,4 @@ function resetTokenCache() {
 
 export const __testing = {
   resetTokenCache,
-  determineDevelopmentEnvironment,
 };
