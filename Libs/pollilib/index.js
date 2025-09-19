@@ -108,7 +108,7 @@ export async function chat(payload, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   const referrer = resolveReferrer();
   const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...extra } = payload || {};
-  const url = `${c.textPromptBase}/openai`;
+  const url = `${c.textPromptBase}/${endpoint || 'openai'}`;
   const body = { model: selectedModel, messages, ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}), referrer, ...extra };
 
   const controller = new AbortController();
