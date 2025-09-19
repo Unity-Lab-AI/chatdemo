@@ -66,6 +66,12 @@ const IMAGE_TOOL = {
 let client = null;
 
 const app = document.querySelector('#app');
+const DEBUG = (() => {
+  try {
+    const u = new URL(location.href);
+    return u.searchParams.get('debug') === '1' || /(?:^|[#&?])debug(?:=1)?(?:&|$)/.test(location.href);
+  } catch { return false; }
+})();
 
 // Ensure users get the newest build even with aggressive caches
 void (async function ensureFreshBuild() {
@@ -74,6 +80,7 @@ void (async function ensureFreshBuild() {
     if (res.ok) {
       const data = await res.json();
       const rev = String(data.rev || data.version || data.commit || '').trim();
+      try { globalThis.__BUILD_REV__ = rev; } catch {}
       const key = '__site_rev';
       const prev = localStorage.getItem(key);
       if (rev && prev && rev !== prev) {
@@ -87,6 +94,15 @@ void (async function ensureFreshBuild() {
     }
   } catch {}
 })();
+
+// Register a service worker that prevents caching of app shell (HTML/JS/CSS)
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('./sw.js', { scope: './' })
+      .catch((err) => console.warn('SW register failed', err));
+  });
+}
 app.innerHTML = `
   <main class="container">
     <header class="toolbar">
@@ -127,6 +143,42 @@ app.innerHTML = `
     </p>
   </main>
 `;
+
+let debugEl = null;
+if (DEBUG) {
+  const panel = document.createElement('section');
+  panel.className = 'debug-panel';
+  panel.style.marginTop = '12px';
+  panel.style.padding = '8px 12px';
+  panel.style.border = '1px solid #ccc';
+  panel.style.borderRadius = '6px';
+  panel.style.background = '#fafafa';
+  panel.innerHTML = `
+    <h3 style="margin:0 0 8px 0; font-size:14px;">Diagnostics</h3>
+    <div id="debugContent" style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:12px; white-space:pre-wrap;"></div>
+  `;
+  app.querySelector('.container')?.appendChild(panel);
+  debugEl = panel.querySelector('#debugContent');
+}
+
+function renderDebugPanel(extra = {}) {
+  if (!DEBUG || !debugEl) return;
+  const rev = (globalThis && globalThis.__BUILD_REV__) || null;
+  const ref = (globalThis && globalThis.__POLLINATIONS_REFERRER__) || null;
+  const log = (globalThis && globalThis.__PANEL_LOG__) || [];
+  const active = state?.activeModel?.info?.id || els?.modelSelect?.value || null;
+  const endpoints = state?.activeModel?.info?.endpoints || [];
+  const recent = log.slice(-6);
+  const payload = {
+    version: rev,
+    referrer: ref,
+    selectedModel: active,
+    endpoints,
+    lastRequests: recent,
+    ...extra,
+  };
+  debugEl.textContent = JSON.stringify(payload, null, 2);
+}
 
 const els = {
   form: document.querySelector('#chatForm'),

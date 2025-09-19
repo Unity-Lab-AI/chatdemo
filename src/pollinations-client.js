@@ -3,6 +3,7 @@ import { PolliClient, DEFAULT_REFERRER } from '../Libs/pollilib/index.js';
 export async function createPollinationsClient({ referrer } = {}) {
   const inferredReferrer = referrer ?? inferReferrer() ?? DEFAULT_REFERRER;
   const client = new PolliClient();
+  try { globalThis.__POLLINATIONS_REFERRER__ = inferredReferrer; } catch {}
   return {
     client,
     tokenSource: null,
@@ -20,4 +21,3 @@ function inferReferrer() {
 }
 
 export const __testing = {};
-

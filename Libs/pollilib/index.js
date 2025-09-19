@@ -1,7 +1,7 @@
 // Compatibility wrapper for browser + Node usage without requiring tokens.
 // Exposes: PolliClient (lite), textModels, chat, image, DEFAULT_REFERRER
 
-export const DEFAULT_REFERRER = 'https://unityailab.com';
+export const DEFAULT_REFERRER = 'https://www.unityailab.com';
 
 function getFetch(fn) {
   if (typeof fn === 'function') return fn;
@@ -93,6 +93,32 @@ export class PolliClient {
 
 function resolveReferrer() {
   try {
+    // Prefer meta override
+    if (typeof document !== 'undefined' && document?.querySelector) {
+      const names = ['polli-referrer', 'pollinations-referrer'];
+      for (const name of names) {
+        const meta = document.querySelector(`meta[name="${name}"]`);
+        if (meta) {
+          const v = meta.getAttribute('content');
+          if (typeof v === 'string' && v.trim()) return v.trim();
+        }
+      }
+    }
+    // Window globals
+    if (typeof window !== 'undefined') {
+      const winVals = [window.POLLI_REFERRER, window.__POLLI_REFERRER__];
+      for (const v of winVals) {
+        if (typeof v === 'string' && v.trim()) return v.trim();
+      }
+    }
+    // Env (Vite or Node)
+    const env = (typeof import !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : undefined;
+    const penv = (typeof process !== 'undefined' && process?.env) ? process.env : undefined;
+    const envVals = [env?.VITE_POLLI_REFERRER, env?.POLLI_REFERRER, penv?.VITE_POLLI_REFERRER, penv?.POLLI_REFERRER];
+    for (const v of envVals) {
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    // Page origin
     if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
     if (typeof document !== 'undefined' && document.location?.origin) return document.location.origin;
   } catch {}
@@ -115,12 +141,20 @@ export async function chat(payload, client) {
   if (extra.seed != null) search.set('seed', String(extra.seed));
   if (referrer) search.set('referer', referrer);
   if (extra.token) search.set('token', String(extra.token));
-  const url = `${c.textPromptBase}/openai?${search.toString()}`;
+  // Choose provider route: seed-family models should hit /seed, else /openai
+  const isSeedFamily =
+    String(endpoint).toLowerCase() === 'seed' || /unity|flux|kontext|chatdolphin|hunyuan|kling|blackforest/i.test(String(selectedModel));
+  const route = isSeedFamily ? 'seed' : 'openai';
+  const url = `${c.textPromptBase}/${route}?${search.toString()}`;
   const body = { model: selectedModel, messages, ...(referrer ? { referrer } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}) };
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), c.timeoutMs);
   try {
+    try {
+      const log = (globalThis && (globalThis.__PANEL_LOG__ ||= []));
+      log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai', route } });
+    } catch {}
     const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
@@ -135,8 +169,16 @@ export async function chat(payload, client) {
         if (!data.modelAliases.includes(selectedModel)) data.modelAliases.push(selectedModel);
       }
     } catch {}
+    try {
+      const log = (globalThis && globalThis.__PANEL_LOG__);
+      if (log) log.push({ ts: Date.now(), kind: 'chat:response', url, model: data?.model || null, ok: true });
+    } catch {}
     return data;
   } finally {
+    try {
+      const log = (globalThis && globalThis.__PANEL_LOG__);
+      if (log) log.splice(0, Math.max(0, log.length - 100));
+    } catch {}
     clearTimeout(t);
   }
 }
