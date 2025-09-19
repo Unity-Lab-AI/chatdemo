@@ -108,8 +108,7 @@ export async function chat(payload, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   const referrer = resolveReferrer();
   const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...extra } = payload || {};
-
-  const url = `${c.textPromptBase}/${endpoint || 'openai'}`;
+  const url = `${c.textPromptBase}/openai`;
   const body = { model: selectedModel, messages, ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}), referrer, ...extra };
 
   const controller = new AbortController();
@@ -118,6 +117,17 @@ export async function chat(payload, client) {
     const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
+    // Augment metadata to help UI match requested vs served model
+    try {
+      if (data && typeof data === 'object') {
+        const meta = data.metadata && typeof data.metadata === 'object' ? data.metadata : (data.metadata = {});
+        meta.requested_model = selectedModel;
+        meta.requestedModel = selectedModel;
+        meta.endpoint = endpoint || 'openai';
+        if (!Array.isArray(data.modelAliases)) data.modelAliases = [];
+        if (!data.modelAliases.includes(selectedModel)) data.modelAliases.push(selectedModel);
+      }
+    } catch {}
     return data;
   } finally {
     clearTimeout(t);

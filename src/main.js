@@ -66,6 +66,27 @@ const IMAGE_TOOL = {
 let client = null;
 
 const app = document.querySelector('#app');
+
+// Ensure users get the newest build even with aggressive caches
+void (async function ensureFreshBuild() {
+  try {
+    const res = await fetch('./version.json?cb=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const rev = String(data.rev || data.version || data.commit || '').trim();
+      const key = '__site_rev';
+      const prev = localStorage.getItem(key);
+      if (rev && prev && rev !== prev) {
+        localStorage.setItem(key, rev);
+        const u = new URL(location.href);
+        u.searchParams.set('v', rev);
+        location.replace(u.toString());
+      } else if (rev && !prev) {
+        localStorage.setItem(key, rev);
+      }
+    }
+  } catch {}
+})();
 app.innerHTML = `
   <main class="container">
     <header class="toolbar">
