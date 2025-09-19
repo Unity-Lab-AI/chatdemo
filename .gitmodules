@@ -1,0 +1,3 @@
+[submodule "libs/PolliLib"]
+	path = libs/PolliLib
+	url = https://github.com/Unity-Lab-AI/PolliLib.git

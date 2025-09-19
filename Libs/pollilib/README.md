@@ -1,104 +1,132 @@
-# polliLib
+# PolliLib
 
-A unified, environment-agnostic JavaScript wrapper around the [Pollinations](https://pollinations.ai) API.  The library was
-re-built from the previous split `javascript`, `javascript-web`, and `javascript-node` implementations so the exact same
-source can be bundled into browser applications or imported directly in Node.
+A modular, language-agnostic client library for Pollinations AI — with first-class Python and JavaScript implementations, a shared API AST, and tests. PolliLib focuses on clear defaults, portability, and symmetry across languages.
 
-## Features
+## Highlights
+- Unified client design in Python and JavaScript (ESM).
+- Image generation, text generation, chat completions (non-stream + SSE stream), tools/function-calling, vision (image URL + local file), and speech-to-text.
+- Public feeds (SSE) for images and text with optional image bytes or data URLs.
+- Random seed defaults (5–8 digits) applied consistently across image and text/chat APIs.
+- Optional `referrer` and `token` supported on all endpoints that accept them.
+- Language-agnostic API AST in `/AST` to keep the two implementations in sync.
 
-- Works in browsers, Node 18+, Bun, and any runtime that exposes a WHATWG `fetch` implementation.
-- Automatic referrer-based authentication in the browser and secure token based authentication for backends.
-- Streaming support for the text and OpenAI-compatible chat endpoints.
-- Image, audio (TTS/STT), and vision helpers that return ergonomic `BinaryData` wrappers.
-- Feed consumers, tool helpers, and MCP-friendly utilities.
-- Lightweight ES module source that can be bundled with tools such as Vite, Rollup, or Webpack without additional shims.
-
-## Installation
-
-The library is pure ESM.  You can import it directly from source or publish it as an npm package.  When using it in a browser
-project make sure your bundler is configured for ES modules.
-
-```js
-import { PolliClient, text } from './Libs/pollilib/index.js';
-
-const client = new PolliClient();
-const reply = await text('Hello from polliLib!', {}, client);
-console.log(reply);
+## Repository Structure
+```
+AST/                    # Language-agnostic API AST (JSON) + README
+javascript/             # JavaScript ESM library + tests
+  polliLib/             # Core modules (base, images, text, chat, vision, stt, feeds)
+  tests/                # Node test suite (node:test)
+  package.json          # Library metadata (no server, library-only)
+python/                 # Python library + tests
+  polliLib/             # Core modules and __main__ examples
+  tests/                # pytest suite
+  requirements.txt      # Dev/test dependencies
+AGENTS.md               # Repo guidance for agents (stage+commit only)
+README.md               # You are here
 ```
 
-In Node 18+ run the script with `node --experimental-modules` on older releases or simply `node` when ES modules are enabled
-(the default for `.mjs` files or when `"type": "module"` is set).
+## Quick Start
 
-## Authentication
+### Python
+- Requirements: Python 3.10+.
+- Install deps: `python -m pip install -r python/requirements.txt`
+- Import via module path (without packaging):
 
-polliLib ships with a flexible `PolliClient` that can operate in one of three modes:
+```python
+import os, sys
+sys.path.append(os.path.join(os.getcwd(), 'python'))
 
-| Mode       | When to use                                         | Behaviour |
-|------------|-----------------------------------------------------|-----------|
-| `referrer` | Frontend/browser apps (default when `window` exists) | Adds the referrer domain to outgoing requests. |
-| `token`    | Trusted backends or CLIs                            | Retrieves a token via a provider function and sends it using the `Authorization` header by default. |
-| `none`     | Quick experiments                                   | Sends anonymous requests and respects public rate limits. |
+from polliLib import PolliClient, generate_image, generate_text
 
-Example backend usage with a token provider:
+# Image (defaults: model=flux, 512x512, nologo=true, random seed)
+path = generate_image(
+    'A serene lake at sunrise, photorealistic, 35mm',
+    out_path='images/example.jpeg',
+)
+print('Saved image to', path)
 
-```js
-import { PolliClient, chat } from './Libs/pollilib/index.js';
-
-const client = new PolliClient({
-  auth: {
-    mode: 'token',
-    // Never embed static tokens inside frontend bundles.
-    getToken: () => process.env.POLLINATIONS_TOKEN,
-  },
-});
-
-const response = await chat({
-  model: 'openai',
-  messages: [{ role: 'user', content: 'Give me a short haiku about Pollinations.' }],
-}, client);
-
-console.log(response.choices[0].message.content);
+# Text (default model=openai, random seed)
+text = generate_text('Write a haiku about lakes at sunrise')
+print(text)
 ```
 
-When bundling for the browser you can omit the `auth` block and the client will rely on the page referrer automatically.
-If you must call authenticated endpoints from the frontend provide a `getToken` function that performs a server round-trip to
-fetch a short-lived credential; the library never appends tokens to query strings unless you explicitly request that behaviour.
+- Tests: `pytest python/tests`
+- Examples: `python -m polliLib` (runs minimal examples; streaming feeds are commented to avoid endless loops).
 
-## Working with binary responses
-
-Functions like `image()` and `tts()` return a `BinaryData` instance.  It lazily exposes the payload in the form most convenient
-for your environment:
+### JavaScript (Node, ESM)
+- Requirements: Node 18+ (global `fetch` available). For older Node, pass a `fetch` in the client constructor.
+- Import and use:
 
 ```js
-const picture = await image('Colourful abstract art', { width: 768, height: 512 }, client);
+import {
+  PolliClient,
+  generate_image,
+  generate_text,
+  chat_completion_stream,
+} from './javascript/polliLib/index.js';
 
-// Browser: attach to an <img>
-const url = picture.toDataUrl();
-document.querySelector('img#result').src = url;
+// Image (defaults: model=flux, 512x512, nologo=true, random seed)
+const imgPath = await generate_image(
+  'A serene lake at sunrise, photorealistic, 35mm',
+  { outPath: 'images/example.jpeg' }
+);
+console.log('Saved image to', imgPath);
 
-// Node: write to disk
-import { writeFile } from 'node:fs/promises';
-await writeFile('artwork.png', picture.toNodeBuffer());
-```
+// Text (default model=openai, random seed)
+const text = await generate_text('Write a haiku about lakes at sunrise');
+console.log(text);
 
-`BinaryData` also exposes `arrayBuffer()`, `uint8Array()`, and `toBase64()` helpers so you do not need to juggle environment
-specific APIs.
-
-## Streaming text
-
-Both `text()` and `chat()` support server-sent events when the `stream` option is `true`:
-
-```js
-const stream = await text('List five emoji for joy', { stream: true }, client);
-for await (const chunk of stream) {
-  console.log(chunk);
+// Chat streaming (SSE)
+for await (const chunk of chat_completion_stream([
+  { role: 'user', content: 'Tell me about 35mm photography aesthetics' }
+])) {
+  process.stdout.write(chunk);
 }
 ```
 
-`chat()` yields parsed JSON objects for each chunk which makes tool calling loops straightforward.
+- Tests: `node --test javascript/tests`
 
-## Tooling helpers
+## API Overview (Shared Semantics)
+- Seeds: If omitted, a random 5–8 digit seed is generated.
+- Images: Defaults — `model=flux`, `width=512`, `height=512`, `nologo=true`. When `out_path/outPath` is provided, bytes stream to disk; otherwise the function returns binary data (Python `bytes`, JS `Buffer`).
+- Text: `model='openai'` by default. `as_json/asJson` optionally parses JSON responses with a string fallback.
+- Chat: Non-streaming returns assistant content (or full JSON when requested). Streaming yields content chunks via SSE; terminator is `[DONE]`.
+- Tools/Function-calling: Provide tool specs and optional local functions; tool calls are executed locally and appended to conversation history up to `max_rounds`.
+- Vision: Accepts image URLs or local files (encoded as data URLs) and returns content; optional JSON output.
+- Speech-to-Text: Accepts `mp3` or `wav`, encodes to base64 input_audio, returns transcribed text.
+- Feeds: Public image/text feeds via SSE. Optional byte/data URL inclusion for image events.
+- Optional `referrer` and `token`: Include them where supported; both may be supplied.
 
-The `ToolBox`, `chatWithTools()`, pipeline steps, feed consumers, and MCP helpers have all been updated to work across
-runtimes.  See the source files inside `src/` for additional details and customise them as needed for your app.
+## The AST (/AST)
+- Purpose: Keep Python and JavaScript APIs aligned, document contracts, and simplify cross-language porting.
+- Files: `polli.ast.json` (manifest + shared types) and per-module ASTs (`base`, `images`, `text`, `chat`, `vision`, `stt`, `feeds`, `client`).
+- Maintenance rules:
+  - Update AST whenever public API surfaces change (names, params/defaults, returns, streaming contracts, errors).
+  - Record Python snake_case vs JS camelCase and timeout units (seconds vs milliseconds).
+  - Validate behavior with both test suites before committing AST changes.
 
+## Development and Testing
+- Python tests: `python -m pip install -r python/requirements.txt && pytest python/tests`
+- JS tests: `node --test javascript/tests`
+- Formatting: Follow existing style (no new tooling unless already configured).
+- Do not push from automation. Follow AGENTS.md: stage and commit only; maintainers will push.
+
+## Contribution Guidelines
+- See `CONTRIBUTING.md` for detailed guidance.
+- Highlights:
+  - Stage + commit only (no pushes). Optionally create tags if requested.
+  - Update `/AST` whenever changing public APIs.
+  - Add or update tests in `python/tests` and `javascript/tests`.
+  - Keep parameters and defaults consistent across languages.
+  - Document new features in language READMEs and the root README.
+
+## Project Notes
+- Packaging: The repo currently favors direct source usage for Python/JS. If publishing to PyPI/npm is desired, add packaging metadata and update READMEs accordingly.
+- Environment: For Python imports without packaging, ensure your `PYTHONPATH` includes the `python` folder (as shown above).
+- Node fetch: On Node <18 or in browsers lacking `fetch`, pass a `fetch` implementation to `new PolliClient({ fetch })`.
+
+## License
+- See repository terms (no license file included). If you need explicit licensing, open an issue to discuss.
+
+## Acknowledgments
+- Built for Pollinations AI. This project aims to provide a clean, modular client with mirrored Python and JavaScript APIs and a shared AST to accelerate cross-language evolution.
