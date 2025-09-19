@@ -26,9 +26,8 @@ export async function run() {
     await chat({ endpoint: 'openai', messages, tools }, client);
 
     assert.ok(calls.length >= 1, 'expected a network call');
-    const body = JSON.parse(calls[0].opts.body);
-    assert.equal(typeof body.referrer, 'string');
-    assert.equal(body.referrer, 'https://demo.example.com');
+    const calledUrl = new URL(calls[0].url);
+    assert.equal(calledUrl.searchParams.get('referer'), 'https://demo.example.com');
   } finally {
     if (originalFetch) globalThis.fetch = originalFetch; else delete globalThis.fetch;
     if (typeof originalWindow === 'undefined') delete globalThis.window; else globalThis.window = originalWindow;

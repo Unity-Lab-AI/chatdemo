@@ -108,9 +108,15 @@ export async function chat(payload, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   const referrer = resolveReferrer();
   const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...extra } = payload || {};
-  // Use the OpenAI-compatible route; actual model is passed in the payload.
-  const url = `${c.textPromptBase}/openai`;
-  const body = { model: selectedModel, messages, ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}), referrer, ...extra };
+
+  // Build OpenAI-compatible route with model/seed/referer as query params
+  const search = new URLSearchParams();
+  search.set('model', String(selectedModel));
+  if (extra.seed != null) search.set('seed', String(extra.seed));
+  if (referrer) search.set('referer', referrer);
+  if (extra.token) search.set('token', String(extra.token));
+  const url = `${c.textPromptBase}/openai?${search.toString()}`;
+  const body = { model: selectedModel, messages, ...(referrer ? { referrer } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}) };
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), c.timeoutMs);

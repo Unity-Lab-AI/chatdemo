@@ -60,6 +60,6 @@ export async function run() {
   const authHeader = request.init.headers?.Authorization ?? request.init.headers?.authorization;
   assert.equal(authHeader, undefined);
   const payload = JSON.parse(request.init.body);
-  assert.equal(payload.model, 'unity');
+  assert.equal(requestUrl.searchParams.get('model'), 'unity');
   assert.deepEqual(payload.messages, messages);
 }

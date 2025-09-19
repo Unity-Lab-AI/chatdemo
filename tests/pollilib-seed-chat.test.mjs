@@ -52,8 +52,9 @@ export async function run() {
   assert.ok(url.pathname.endsWith('/openai'), 'Seed requests should hit the /openai endpoint');
   // seed is randomized by the client; we do not assert it
   const payload = JSON.parse(request.init.body);
-  assert.equal(payload.referrer, 'https://unityailab.com');
-  assert.equal(payload.model, 'unity');
+  const sp = new URL(request.url).searchParams;
+  assert.equal(sp.get('referer'), 'https://unityailab.com');
+  assert.equal(sp.get('model'), 'unity');
   assert.deepEqual(payload.messages, messages);
 }
 

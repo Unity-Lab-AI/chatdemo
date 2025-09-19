@@ -31,7 +31,8 @@ export async function run() {
   const defaultUrl = new URL(requests[0].url);
   assert.ok(defaultUrl.pathname.endsWith('/openai'));
   const defaultPayload = JSON.parse(requests[0].init.body);
-  assert.equal(defaultPayload.model, 'openai');
+  const defaultQs = new URL(requests[0].url).searchParams;
+  assert.equal(defaultQs.get('model'), 'openai');
   assert.deepEqual(defaultPayload.messages, messages);
 
   const seedResponse = await chat({ endpoint: 'seed', model: 'unity', messages, tools }, client);
@@ -41,6 +42,7 @@ export async function run() {
   const seedUrl = new URL(requests[1].url);
   assert.ok(seedUrl.pathname.endsWith('/openai'));
   const parsedSeedBody = JSON.parse(requests[1].init.body);
-  assert.equal(parsedSeedBody.model, 'unity');
+  const seedQs = new URL(requests[1].url).searchParams;
+  assert.equal(seedQs.get('model'), 'unity');
   assert.deepEqual(parsedSeedBody.messages, messages);
 }
