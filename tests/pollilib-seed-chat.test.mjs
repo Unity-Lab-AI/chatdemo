@@ -53,9 +53,10 @@ export async function run() {
   // seed is randomized by the client; we do not assert it
   const payload = JSON.parse(request.init.body);
   const sp = new URL(request.url).searchParams;
-  assert.equal(sp.get('referer'), 'https://unityailab.com');
+  assert.equal(sp.get('referer'), 'https://www.unityailab.com');
   assert.equal(sp.get('model'), 'unity');
   assert.deepEqual(payload.messages, messages);
 }
+
 
 

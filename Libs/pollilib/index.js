@@ -112,7 +112,7 @@ function resolveReferrer() {
       }
     }
     // Env (Vite or Node)
-    const env = (typeof import !== 'undefined' && typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env : undefined;
+    const env = (typeof import.meta !== 'undefined' && import.meta && import.meta.env) ? import.meta.env : undefined;
     const penv = (typeof process !== 'undefined' && process?.env) ? process.env : undefined;
     const envVals = [env?.VITE_POLLI_REFERRER, env?.POLLI_REFERRER, penv?.VITE_POLLI_REFERRER, penv?.POLLI_REFERRER];
     for (const v of envVals) {
@@ -152,8 +152,11 @@ export async function chat(payload, client) {
   const t = setTimeout(() => controller.abort(), c.timeoutMs);
   try {
     try {
-      const log = (globalThis && (globalThis.__PANEL_LOG__ ||= []));
-      log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai', route } });
+      let log = (globalThis && globalThis.__PANEL_LOG__);
+      if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
+      if (log && Array.isArray(log)) {
+        log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai', route } });
+      }
     } catch {}
     const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -171,13 +174,13 @@ export async function chat(payload, client) {
     } catch {}
     try {
       const log = (globalThis && globalThis.__PANEL_LOG__);
-      if (log) log.push({ ts: Date.now(), kind: 'chat:response', url, model: data?.model || null, ok: true });
+      if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:response', url, model: data?.model || null, ok: true });
     } catch {}
     return data;
   } finally {
     try {
       const log = (globalThis && globalThis.__PANEL_LOG__);
-      if (log) log.splice(0, Math.max(0, log.length - 100));
+      if (log && Array.isArray(log)) log.splice(0, Math.max(0, log.length - 100));
     } catch {}
     clearTimeout(t);
   }
