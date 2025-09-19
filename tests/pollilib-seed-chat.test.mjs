@@ -52,8 +52,9 @@ export async function run() {
   assert.ok(url.pathname.endsWith('/seed'), 'Seed requests should hit the /seed endpoint');
   // seed is randomized by the client; we do not assert it
   const payload = JSON.parse(request.init.body);
-  assert.equal(payload.referrer, 'https://www.unityailab.com');
+  assert.equal(payload.referrer, 'https://unityailab.com');
   assert.equal(payload.model, 'seed');
   assert.deepEqual(payload.messages, messages);
 }
+
 

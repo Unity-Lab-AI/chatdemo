@@ -1,7 +1,7 @@
 // Compatibility wrapper for browser + Node usage without requiring tokens.
 // Exposes: PolliClient (lite), textModels, chat, image, DEFAULT_REFERRER
 
-export const DEFAULT_REFERRER = 'https://www.unityailab.com';
+export const DEFAULT_REFERRER = 'https://unityailab.com';
 
 function getFetch(fn) {
   if (typeof fn === 'function') return fn;
@@ -91,7 +91,7 @@ export class PolliClient {
   }
 }
 
-function inferReferrer() {
+function resolveReferrer() {
   try {
     if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
     if (typeof document !== 'undefined' && document.location?.origin) return document.location.origin;
@@ -106,7 +106,7 @@ export async function textModels(client) {
 
 export async function chat(payload, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
-  const referrer = inferReferrer();
+  const referrer = resolveReferrer();
   const { endpoint = 'openai', messages = [], tools = null, tool_choice = 'auto', ...rest } = payload || {};
   const { model: _ignoreModel, ...extra } = rest;
   if (Array.isArray(tools) && tools.length) {
@@ -118,7 +118,7 @@ export async function chat(payload, client) {
 
 export async function image(prompt, options, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
-  const referrer = inferReferrer();
+  const referrer = resolveReferrer();
   const { width = 1024, height = 1024, model = 'flux', nologo = true, seed = null } = options || {};
   const arr = await c.generate_image(String(prompt || '').trim(), { width, height, model, nologo, seed: seed == null ? undefined : seed, referrer });
   const contentType = 'image/jpeg';
@@ -133,3 +133,5 @@ export async function image(prompt, options, client) {
   }
   return { toDataUrl() { return `data:${contentType};base64,${toBase64FromArrayBuffer(arr)}`; } };
 }
+
+
