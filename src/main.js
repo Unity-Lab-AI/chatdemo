@@ -878,20 +878,13 @@ async function initializeApp() {
       client: polliClient,
       tokenSource: resolvedTokenSource,
       tokenMessages: resolvedTokenMessages,
+      referrer,
     } = await createPollinationsClient();
     client = polliClient;
     tokenSource = resolvedTokenSource;
     tokenMessages = Array.isArray(resolvedTokenMessages) ? resolvedTokenMessages : [];
-    if (tokenSource) {
-      console.info('Pollinations token loaded via %s.', tokenSource);
-    } else if (tokenMessages.length) {
-      console.warn(
-        'Proceeding without a Pollinations token. Attempts: %s',
-        tokenMessages.join('; '),
-      );
-    } else {
-      console.info('Proceeding without a Pollinations token.');
-    }
+    // Using referrer-only access; no token required.
+    console.info('Pollinations client configured (referrer: %s).', referrer || 'unknown');
   } catch (error) {
     console.error('Failed to configure Pollinations client', error);
     setLoading(false);
@@ -907,8 +900,8 @@ async function initializeApp() {
     setLoading(false);
   }
 
-  if (!tokenSource && !state.statusError) {
-    setStatus('Ready. Pollinations token not configured; only public models are available.');
+  if (!state.statusError) {
+    setStatus(`Ready. Using referrer-based access${typeof referrer === 'string' && referrer ? ' (' + referrer + ')' : ''}.`);
   }
 
   try {

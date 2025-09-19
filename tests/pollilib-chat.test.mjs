@@ -34,13 +34,13 @@ export async function run() {
   assert.equal(defaultPayload.model, 'openai');
   assert.deepEqual(defaultPayload.messages, messages);
 
-  const seedResponse = await chat({ endpoint: 'seed', messages, tools }, client);
-  assert.equal(seedResponse.model, 'seed');
+  const seedResponse = await chat({ endpoint: 'seed', model: 'unity', messages, tools }, client);
+  assert.equal(seedResponse.model, 'unity');
   assert.equal(seedResponse.choices[0].message.content, 'Hello from Pollinations!');
   assert.equal(requests[1].init.method, 'POST');
   const seedUrl = new URL(requests[1].url);
   assert.ok(seedUrl.pathname.endsWith('/seed'));
   const parsedSeedBody = JSON.parse(requests[1].init.body);
-  assert.equal(parsedSeedBody.model, 'seed');
+  assert.equal(parsedSeedBody.model, 'unity');
   assert.deepEqual(parsedSeedBody.messages, messages);
 }

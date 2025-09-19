@@ -107,13 +107,21 @@ export async function textModels(client) {
 export async function chat(payload, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   const referrer = resolveReferrer();
-  const { endpoint = 'openai', messages = [], tools = null, tool_choice = 'auto', ...rest } = payload || {};
-  const { model: _ignoreModel, ...extra } = rest;
-  if (Array.isArray(tools) && tools.length) {
-    return c.chat_completion_tools(messages, { model: endpoint || 'openai', tools, tool_choice: tool_choice || 'auto', referrer, asJson: true, ...extra });
+  const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...extra } = payload || {};
+
+  const url = `${c.textPromptBase}/${endpoint || 'openai'}`;
+  const body = { model: selectedModel, messages, ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}), referrer, ...extra };
+
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), c.timeoutMs);
+  try {
+    const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    return data;
+  } finally {
+    clearTimeout(t);
   }
-  const data = await c.chat_completion(messages, { model: endpoint || 'openai', referrer, asJson: true, ...extra });
-  return typeof data === 'string' ? { choices: [{ message: { content: data } }] } : data;
 }
 
 export async function image(prompt, options, client) {

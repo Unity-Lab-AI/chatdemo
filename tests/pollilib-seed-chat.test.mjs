@@ -38,9 +38,9 @@ export async function run() {
   ];
 
   const tools = [ { type: 'function', function: { name: 'noop', parameters: { type:'object' } } } ];
-  const result = await chat({ endpoint: 'seed', messages, tools, temperature: 0.2 }, client);
+  const result = await chat({ endpoint: 'seed', model: 'unity', messages, tools, temperature: 0.2 }, client);
 
-  assert.equal(result.model, 'seed');
+  assert.equal(result.model, 'unity');
   assert.equal(result.choices[0].message.role, 'assistant');
   assert.equal(result.choices[0].message.content, 'Unity says hi!');
 
@@ -53,7 +53,7 @@ export async function run() {
   // seed is randomized by the client; we do not assert it
   const payload = JSON.parse(request.init.body);
   assert.equal(payload.referrer, 'https://unityailab.com');
-  assert.equal(payload.model, 'seed');
+  assert.equal(payload.model, 'unity');
   assert.deepEqual(payload.messages, messages);
 }
 
