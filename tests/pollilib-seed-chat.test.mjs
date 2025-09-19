@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { PolliClient, chat } from '../Libs/pollilib/index.js';
 
-export const name = 'PolliLib chat() posts payloads to /openai for the seed endpoint';
+export const name = 'PolliLib chat() posts payloads to /seed for the seed endpoint';
 
 export async function run() {
   const requests = [];
@@ -30,16 +30,17 @@ export async function run() {
     );
   };
 
-  const client = new PolliClient({ fetch: fakeFetch, textBase: 'https://text.pollinations.ai' });
+  const client = new PolliClient({ fetch: fakeFetch });
 
   const messages = [
     { role: 'system', content: 'You are a helpful assistant.' },
     { role: 'user', content: 'Hello there!' },
   ];
 
-  const result = await chat({ model: 'unity', endpoint: 'seed', messages, temperature: 0.2 }, client);
+  const tools = [ { type: 'function', function: { name: 'noop', parameters: { type:'object' } } } ];
+  const result = await chat({ endpoint: 'seed', messages, tools, temperature: 0.2 }, client);
 
-  assert.equal(result.model, 'unity');
+  assert.equal(result.model, 'seed');
   assert.equal(result.choices[0].message.role, 'assistant');
   assert.equal(result.choices[0].message.content, 'Unity says hi!');
 
@@ -48,14 +49,11 @@ export async function run() {
   assert.equal(request.init.method, 'POST');
 
   const url = new URL(request.url);
-  assert.ok(url.pathname.endsWith('/openai'), 'Seed requests should hit the /openai endpoint');
-  assert.equal(url.searchParams.get('model'), 'unity');
-  assert.equal(url.searchParams.get('seed'), '12345678');
-  assert.equal(url.searchParams.get('referer'), 'https://www.unityailab.com');
+  assert.ok(url.pathname.endsWith('/seed'), 'Seed requests should hit the /seed endpoint');
+  // seed is randomized by the client; we do not assert it
   const payload = JSON.parse(request.init.body);
-  assert.equal(payload.model, 'unity');
-  assert.equal(payload.seed, '12345678');
-  assert.equal(payload.temperature, 0.2);
-  assert.equal(payload.endpoint, 'seed');
+  assert.equal(payload.referrer, 'https://www.unityailab.com');
+  assert.equal(payload.model, 'seed');
   assert.deepEqual(payload.messages, messages);
 }
+

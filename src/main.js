@@ -1,5 +1,6 @@
 import './style.css';
-import { chat, image, textModels, tts, DEFAULT_SEED } from '../Libs/pollilib/index.js';
+import { chat, image, textModels } from '../Libs/pollilib/index.js';
+import { generateSeed } from './seed.js';
 import { createPollinationsClient } from './pollinations-client.js';
 import {
   createFallbackModel,
@@ -13,7 +14,7 @@ const FALLBACK_MODELS = [
   createFallbackModel('mistral', 'Mistral Small (fallback)'),
 ];
 
-const FALLBACK_VOICES = ['nova', 'ash', 'alloy', 'echo', 'fable'];
+const FALLBACK_VOICES = [];
 const DEFAULT_STATUS = 'Ready.';
 const IMAGE_TOOL = {
   type: 'function',
@@ -311,39 +312,9 @@ function renderTextInto(container, text) {
   }
 }
 
-async function speakMessage(message, { autoplay = false } = {}) {
-  if (!message?.content || !state.voicePlayback || !els.voiceSelect.value) {
-    return;
-  }
-  if (message.audioUrl) {
-    if (autoplay) {
-      void playMessageAudio(message);
-    }
-    return;
-  }
-  message.audioPending = true;
-  message.audioError = null;
-  renderMessages();
-  try {
-    const voice = els.voiceSelect.value;
-    const audioData = await tts(message.content, { voice, model: 'openai-audio' }, client);
-    const blob = audioData.blob();
-    const url = URL.createObjectURL(blob);
-    trackedAudioUrls.add(url);
-    message.audioUrl = url;
-    message.audioVoice = voice;
-    message.audioPending = false;
-    renderMessages();
-    if (autoplay) {
-      void playMessageAudio(message);
-    }
-  } catch (error) {
-    console.error('TTS failed', error);
-    message.audioPending = false;
-    message.audioError = error?.message ?? String(error);
-    renderMessages();
-    setStatus(`Text-to-speech failed: ${message.audioError}`, { error: true });
-  }
+async function speakMessage(_message, _opts = {}) {
+  // TTS is not available in the current JS PolliLib; voice playback disabled.
+  return;
 }
 
 async function playMessageAudio(message) {
@@ -538,7 +509,7 @@ async function generateImageAsset(prompt, { width, height, model: imageModel } =
     if (!client) {
       throw new Error('Pollinations client is not ready.');
     }
-    const seed = DEFAULT_SEED;
+    const seed = generateSeed();
     const binary = await image(
       prompt,
       {
@@ -546,8 +517,7 @@ async function generateImageAsset(prompt, { width, height, model: imageModel } =
         height,
         model: imageModel,
         nologo: true,
-        private: true,
-        enhance: true,
+        seed,
       },
       client,
     );

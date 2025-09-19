@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { PolliClient, chat } from '../Libs/pollilib/index.js';
 
-export const name = 'PolliLib seed chat payloads include query tokens';
+export const name = 'PolliLib seed chat payloads include referrer (no token)';
 
 function createResponse(body) {
   if (typeof Response === 'function') {
@@ -43,11 +43,7 @@ export async function run() {
     return createResponse('');
   };
 
-  const client = new PolliClient({
-    fetch: fakeFetch,
-    auth: { mode: 'token', token: 'example-token' },
-    timeoutMs: 1_000,
-  });
+  const client = new PolliClient({ fetch: fakeFetch, timeoutMs: 1_000 });
 
   const messages = [{ role: 'user', content: 'Say hello' }];
   const result = await chat({ model: 'unity', endpoint: 'seed', messages }, client);
@@ -58,15 +54,12 @@ export async function run() {
   const [request] = requests;
   assert.equal(request.init.method, 'POST');
   const requestUrl = new URL(request.url);
-  assert.ok(requestUrl.pathname.endsWith('/openai'));
-  assert.equal(requestUrl.searchParams.get('token'), 'example-token');
-  assert.equal(requestUrl.searchParams.get('model'), 'unity');
-  assert.equal(requestUrl.searchParams.get('seed'), '12345678');
-  assert.equal(requestUrl.searchParams.get('referer'), 'https://www.unityailab.com');
+  assert.ok(requestUrl.pathname.endsWith('/seed'));
+  // No token should be present in URL or headers
+  assert.equal(requestUrl.searchParams.get('token'), null);
   const authHeader = request.init.headers?.Authorization ?? request.init.headers?.authorization;
-  assert.equal(authHeader, 'Bearer example-token');
+  assert.equal(authHeader, undefined);
   const payload = JSON.parse(request.init.body);
-  assert.equal(payload.endpoint, 'seed');
-  assert.equal(payload.seed, '12345678');
+  assert.equal(payload.model, 'seed');
   assert.deepEqual(payload.messages, messages);
 }

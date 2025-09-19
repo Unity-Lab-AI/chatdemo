@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { createPollinationsClient, __testing } from '../src/pollinations-client.js';
+import { createPollinationsClient } from '../src/pollinations-client.js';
 
-export const name = 'Pollinations client resolves tokens from environment variables';
+export const name = 'Pollinations client ignores tokens from environment variables (referrer-only)';
 
 function createStubResponse(status = 404) {
   return {
@@ -34,13 +34,9 @@ export async function run() {
     process.env.VITE_POLLI_TOKEN = 'undefined';
     process.env.VITE_POLLINATIONS_TOKEN = 'null';
     process.env.NODE_ENV = 'production';
-    __testing.resetTokenCache();
-
-    const { client, tokenSource } = await createPollinationsClient();
-    assert.equal(tokenSource, 'env');
-
-    const token = await client._auth.getToken();
-    assert.equal(token, 'process-env-token');
+    const { tokenSource } = await createPollinationsClient();
+    // Tokens are no longer read from environment; tokenSource should be null
+    assert.equal(tokenSource, null);
   } finally {
     if (originalFetch) {
       globalThis.fetch = originalFetch;
@@ -68,6 +64,6 @@ export async function run() {
       }
     }
 
-    __testing.resetTokenCache();
+    // nothing to reset
   }
 }
