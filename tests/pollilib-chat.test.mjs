@@ -40,7 +40,7 @@ export async function run() {
   assert.equal(seedResponse.choices[0].message.content, 'Hello from Pollinations!');
   assert.equal(requests[1].init.method, 'POST');
   const seedUrl = new URL(requests[1].url);
-  assert.ok(seedUrl.pathname.endsWith('/seed'));
+  assert.ok(seedUrl.pathname.endsWith('/openai'));
   const parsedSeedBody = JSON.parse(requests[1].init.body);
   const seedQs = new URL(requests[1].url).searchParams;
   assert.equal(seedQs.get('model'), 'unity');

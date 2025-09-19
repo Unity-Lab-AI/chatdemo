@@ -141,11 +141,8 @@ export async function chat(payload, client) {
   if (extra.seed != null) search.set('seed', String(extra.seed));
   if (referrer) search.set('referer', referrer);
   if (extra.token) search.set('token', String(extra.token));
-  // Choose provider route: seed-family models should hit /seed, else /openai
-  const isSeedFamily =
-    String(endpoint).toLowerCase() === 'seed' || /unity|flux|kontext|chatdolphin|hunyuan|kling|blackforest/i.test(String(selectedModel));
-  const route = isSeedFamily ? 'seed' : 'openai';
-  const url = `${c.textPromptBase}/${route}?${search.toString()}`;
+  // Always use OpenAI-compatible route; server selects backend based on model
+  const url = `${c.textPromptBase}/openai?${search.toString()}`;
   const body = { model: selectedModel, messages, ...(referrer ? { referrer } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}) };
 
   const controller = new AbortController();
