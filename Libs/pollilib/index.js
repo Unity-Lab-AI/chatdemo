@@ -135,15 +135,15 @@ export async function chat(payload, client) {
   const referrer = resolveReferrer();
   const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...extra } = payload || {};
 
-  // Build OpenAI-compatible route with model/seed/referer as query params
-  const search = new URLSearchParams();
-  search.set('model', String(selectedModel));
-  if (extra.seed != null) search.set('seed', String(extra.seed));
-  if (referrer) search.set('referer', referrer);
-  if (extra.token) search.set('token', String(extra.token));
-  // Always use OpenAI-compatible route; server selects backend based on model
-  const url = `${c.textPromptBase}/openai?${search.toString()}`;
-  const body = { model: selectedModel, messages, ...(referrer ? { referrer } : {}), ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}) };
+  // Per APIDOCS: OpenAI-compatible POST endpoint
+  const url = `${c.textPromptBase}/openai`;
+  const body = {
+    model: selectedModel,
+    messages,
+    ...(referrer ? { referrer } : {}),
+    ...(extra.seed != null ? { seed: extra.seed } : {}),
+    ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
+  };
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), c.timeoutMs);
