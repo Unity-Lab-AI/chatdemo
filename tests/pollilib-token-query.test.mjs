@@ -54,7 +54,7 @@ export async function run() {
   const [request] = requests;
   assert.equal(request.init.method, 'POST');
   const requestUrl = new URL(request.url);
-  assert.ok(requestUrl.pathname.endsWith('/seed'));
+  assert.ok(requestUrl.pathname.endsWith('/openai'));
   // No token should be present in URL or headers
   assert.equal(requestUrl.searchParams.get('token'), null);
   const authHeader = request.init.headers?.Authorization ?? request.init.headers?.authorization;
