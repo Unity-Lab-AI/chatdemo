@@ -154,7 +154,7 @@ export async function chat(payload, client) {
       let log = (globalThis && globalThis.__PANEL_LOG__);
       if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
       if (log && Array.isArray(log)) {
-        log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai', route } });
+        log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai' } });
       }
     } catch {}
     const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
