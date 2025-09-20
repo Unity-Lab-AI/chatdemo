@@ -478,19 +478,32 @@ function tokenizeMarkdownBlocks(text) {
 function extractPolliImagesFromText(text) {
   const tokens = tokenizeMarkdownBlocks(String(text || ''));
   const directives = [];
-  const accepted = new Set(['polli-image', 'pollinations.image', 'image']);
+  const accepted = new Set(['polli-image', 'pollinations.image', 'image', 'json']);
   const kept = [];
   for (const t of tokens) {
     if (t.type === 'code' && accepted.has(t.lang)) {
       const raw = t.content.trim();
       try {
         const obj = JSON.parse(raw);
-        if (obj && typeof obj === 'object' && typeof obj.prompt === 'string' && obj.prompt.trim().length) {
-          directives.push(obj);
-          continue; // omit from kept
+        // Accept multiple shapes: {images:[...]}, {prompt:...}, {image:{prompt:...}}
+        if (obj && typeof obj === 'object') {
+          if (Array.isArray(obj.images) && obj.images.length) {
+            for (const im of obj.images) {
+              if (im && typeof im.prompt === 'string' && im.prompt.trim()) directives.push(im);
+            }
+            continue; // omit from kept
+          }
+          if (obj.image && typeof obj.image === 'object' && typeof obj.image.prompt === 'string') {
+            directives.push({ ...obj.image });
+            continue;
+          }
+          if (typeof obj.prompt === 'string' && obj.prompt.trim().length) {
+            directives.push(obj);
+            continue; // omit from kept
+          }
         }
       } catch (e) {
-        console.warn('Invalid polli-image payload (ignored):', e);
+        console.warn('Invalid JSON payload in code fence (ignored):', e);
       }
     }
     kept.push(t);
@@ -711,7 +724,7 @@ async function sendPrompt(prompt) {
   try {
     setStatus('Waiting for the model…');
     const pinnedId = state.pinnedModelId || selectedModel.id;
-    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints, { wantsJson: FORCE_JSON || hasImageIntent(prompt) });
+    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints, { wantsJson: FORCE_JSON });
     state.activeModel = { id: pinnedId, endpoint, info: selectedModel };
     if (!state.pinnedModelId) {
       state.pinnedModelId = pinnedId;
