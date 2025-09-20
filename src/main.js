@@ -100,6 +100,12 @@ const DEBUG = (() => {
     return u.searchParams.get('debug') === '1' || /(?:^|[#&?])debug(?:=1)?(?:&|$)/.test(location.href);
   } catch { return false; }
 })();
+const FORCE_JSON = (() => {
+  try {
+    const u = new URL(location.href);
+    return u.searchParams.get('json') === '1' || u.searchParams.get('structured') === '1';
+  } catch { return false; }
+})();
 
 // Ensure users get the newest build even with aggressive caches
 void (async function ensureFreshBuild() {
@@ -581,7 +587,7 @@ async function sendPrompt(prompt) {
   try {
     setStatus('Waiting for the model…');
     const pinnedId = state.pinnedModelId || selectedModel.id;
-    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints, { wantsJson: true });
+    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints, { wantsJson: FORCE_JSON || hasImageIntent(prompt) });
     state.activeModel = { id: pinnedId, endpoint, info: selectedModel };
     if (!state.pinnedModelId) {
       state.pinnedModelId = pinnedId;
