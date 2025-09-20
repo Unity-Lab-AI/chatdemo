@@ -205,6 +205,7 @@ const state = {
   loading: false,
   models: [],
   activeModel: null,
+  pinnedModelId: null,
   voicePlayback: false,
   statusMessage: DEFAULT_STATUS,
   statusError: false,
@@ -436,8 +437,12 @@ async function sendPrompt(prompt) {
   state.conversation.push({ role: 'user', content: prompt });
   try {
     setStatus('Waiting for the model…');
-    const { response, endpoint } = await requestChatCompletion(selectedModel, endpoints);
-    state.activeModel = { id: selectedModel.id, endpoint, info: selectedModel };
+    const pinnedId = state.pinnedModelId || selectedModel.id;
+    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints);
+    state.activeModel = { id: pinnedId, endpoint, info: selectedModel };
+    if (!state.pinnedModelId) {
+      state.pinnedModelId = pinnedId;
+    }
     await handleChatResponse(response, selectedModel, endpoint);
     resetStatusIfIdle();
   } catch (error) {
@@ -1042,6 +1047,7 @@ els.form.addEventListener('submit', async event => {
 
 els.modelSelect.addEventListener('change', () => {
   resetConversation({ clearMessages: true });
+  state.pinnedModelId = null;
   const modelName = els.modelSelect.value;
   setStatus(`Switched to ${modelName}.`);
   playbackStatusTimer = window.setTimeout(() => {
