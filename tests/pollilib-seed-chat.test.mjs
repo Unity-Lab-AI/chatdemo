@@ -33,7 +33,6 @@ export async function run() {
   const client = new PolliClient({ fetch: fakeFetch });
 
   const messages = [
-    { role: 'system', content: 'You are a helpful assistant.' },
     { role: 'user', content: 'Hello there!' },
   ];
 

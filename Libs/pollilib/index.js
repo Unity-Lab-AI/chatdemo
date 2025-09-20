@@ -137,9 +137,10 @@ export async function chat(payload, client) {
 
   // Per APIDOCS: OpenAI-compatible POST endpoint
   const url = `${c.textPromptBase}/openai`;
+  const filteredMessages = Array.isArray(messages) ? messages.filter(m => !m || typeof m !== 'object' || m.role !== 'system') : [];
   const body = {
     model: selectedModel,
-    messages,
+    messages: filteredMessages,
     ...(referrer ? { referrer } : {}),
     ...(extra.seed != null ? { seed: extra.seed } : {}),
     ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
