@@ -188,11 +188,29 @@ if (DEBUG) {
   panel.style.borderRadius = '6px';
   panel.style.background = '#fafafa';
   panel.innerHTML = `
-    <h3 style="margin:0 0 8px 0; font-size:14px;">Diagnostics</h3>
-    <div id="debugContent" style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:12px; white-space:pre-wrap;"></div>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+      <h3 style="margin:0; font-size:14px;">Diagnostics</h3>
+      <div style="display:flex; gap:6px;">
+        <button id="dbgCopy" class="ghost" type="button">Copy Logs</button>
+        <button id="dbgClear" class="ghost" type="button">Clear Logs</button>
+        <button id="dbgHealth" class="ghost" type="button">Health Check</button>
+        <label style="display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#374151;">
+          <input id="dbgShowPayloads" type="checkbox" /> Show payload meta
+        </label>
+      </div>
+    </div>
+    <div id="debugContent" style="margin-top:8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size:12px; white-space:pre-wrap;"></div>
   `;
   app.querySelector('.container')?.appendChild(panel);
   debugEl = panel.querySelector('#debugContent');
+  const btnCopy = panel.querySelector('#dbgCopy');
+  const btnClear = panel.querySelector('#dbgClear');
+  const btnHealth = panel.querySelector('#dbgHealth');
+  const chkPayload = panel.querySelector('#dbgShowPayloads');
+  if (btnCopy) btnCopy.addEventListener('click', copyLogsToClipboard);
+  if (btnClear) btnClear.addEventListener('click', clearPanelLogs);
+  if (btnHealth) btnHealth.addEventListener('click', runHealthCheck); 
+  if (chkPayload) chkPayload.addEventListener('change', () => renderDebugPanel());
 }
 
 function renderDebugPanel(extra = {}) {
@@ -202,16 +220,100 @@ function renderDebugPanel(extra = {}) {
   const log = (globalThis && globalThis.__PANEL_LOG__) || [];
   const active = state?.activeModel?.info?.id || els?.modelSelect?.value || null;
   const endpoints = state?.activeModel?.info?.endpoints || [];
-  const recent = log.slice(-6);
+  const recent = log.slice(-12);
+  const sw = (navigator.serviceWorker && navigator.serviceWorker.controller) ? 'active' : 'none';
+  const modelPinned = state?.pinnedModelId || null;
+  const convoLen = state?.conversation?.length || 0;
+  const showPayloads = !!document.querySelector('#dbgShowPayloads')?.checked;
+  const ua = navigator.userAgent;
+  const url = location.href;
+  const jsonMode = !!FORCE_JSON;
   const payload = {
     version: rev,
     referrer: ref,
     selectedModel: active,
+    pinnedModel: modelPinned,
     endpoints,
+    jsonMode,
+    url,
+    ua,
+    serviceWorker: sw,
+    conversationLength: convoLen,
     lastRequests: recent,
     ...extra,
   };
-  debugEl.textContent = JSON.stringify(payload, null, 2);
+  if (!showPayloads) {
+    // Redact verbose details
+    const redacted = JSON.parse(JSON.stringify(payload));
+    if (Array.isArray(redacted.lastRequests)) {
+      redacted.lastRequests = redacted.lastRequests.map(entry => {
+        const e = { ...entry };
+        if (e.meta && typeof e.meta === 'object') {
+          // keep only high-level meta flags
+          e.meta = {
+            ...('endpoint' in e.meta ? { endpoint: e.meta.endpoint } : {}),
+            ...('json' in e.meta ? { json: e.meta.json } : {}),
+            ...('has_tools' in e.meta ? { has_tools: e.meta.has_tools } : {}),
+            ...('tool_count' in e.meta ? { tool_count: e.meta.tool_count } : {}),
+          };
+        }
+        // trim noisy fields
+        delete e.prompt; delete e.payload; delete e.body;
+        return e;
+      });
+    }
+    debugEl.textContent = JSON.stringify(redacted, null, 2);
+  } else {
+    debugEl.textContent = JSON.stringify(payload, null, 2);
+  }
+}
+
+async function copyLogsToClipboard() {
+  try {
+    const data = (globalThis && globalThis.__PANEL_LOG__) || [];
+    const payload = { when: new Date().toISOString(), data };
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    setStatus('Diagnostics copied to clipboard.');
+    setTimeout(() => resetStatusIfIdle(), 1500);
+  } catch (e) {
+    console.warn('Copy failed', e);
+    setStatus('Unable to copy diagnostics.', { error: true });
+  }
+}
+
+function clearPanelLogs() {
+  try {
+    const log = (globalThis && globalThis.__PANEL_LOG__);
+    if (log && Array.isArray(log)) log.length = 0;
+    renderDebugPanel();
+    setStatus('Diagnostics cleared.');
+    setTimeout(() => resetStatusIfIdle(), 1200);
+  } catch (e) {
+    console.warn('Clear logs failed', e);
+  }
+}
+
+async function runHealthCheck() {
+  try {
+    const model = getSelectedModel();
+    if (!model) throw new Error('No model selected.');
+    if (!client) throw new Error('Client not ready.');
+    setStatus('Running health check…');
+    const messages = [{ role: 'user', content: 'Return the word OK.' }];
+    const wantsJson = FORCE_JSON || false;
+    const payload = { model: model.id, endpoint: 'openai', messages, ...(wantsJson ? { response_format: { type: 'json_object' } } : {}) };
+    const started = Date.now();
+    const resp = await chat(payload, client);
+    const ms = Date.now() - started;
+    const ok = Array.isArray(resp?.choices) && (resp.choices[0]?.message?.content ?? '').length >= 2;
+    renderDebugPanel({ health: { ok, ms, model: model.id } });
+    setStatus(ok ? `Health OK (${ms} ms).` : `Health failed (${ms} ms).`, { error: !ok });
+    setTimeout(() => resetStatusIfIdle(), 1500);
+  } catch (e) {
+    console.warn('Health check failed', e);
+    renderDebugPanel({ health: { ok: false, error: e?.message || String(e) } });
+    setStatus('Health check failed: ' + (e?.message || String(e)), { error: true });
+  }
 }
 
 const els = {

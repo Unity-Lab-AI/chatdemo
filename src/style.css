@@ -395,3 +395,15 @@ button.play {
     width: 100%;
   }
 }
+
+/* Debug panel polish */
+.debug-panel button.ghost {
+  background: rgba(15, 23, 42, 0.06);
+  color: #111827;
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+}
+
+.debug-panel button.ghost:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.12);
+}

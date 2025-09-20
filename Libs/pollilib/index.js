@@ -25,8 +25,14 @@ export class PolliClient {
 
   async listModels(kind = 'text') {
     const url = kind === 'image' ? 'https://image.pollinations.ai/models' : 'https://text.pollinations.ai/models';
+    const t0 = Date.now();
     const r = await this.fetch(url, { method: 'GET' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const ms = Date.now() - t0;
+    if (!r.ok) {
+      try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'models:error', url, ok: false, status: r.status, ms }); } catch {}
+      throw new Error(`HTTP ${r.status}`);
+    }
+    try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'models:response', url, ok: true, ms, type: kind }); } catch {}
     const json = await r.json();
     return normalizeModels(json);
   }
@@ -55,8 +61,14 @@ export class PolliClient {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const t0 = Date.now();
       const r = await this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const ms = Date.now() - t0;
+      if (!r.ok) {
+        try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:error', url, ok: false, status: r.status, ms, model, meta: { has_tools: Array.isArray(rest?.tools) && rest.tools.length > 0, json: !!rest?.response_format } }); } catch {}
+        throw new Error(`HTTP ${r.status}`);
+      }
+      try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:response', url, ok: true, ms, model, meta: { has_tools: Array.isArray(rest?.tools) && rest.tools.length > 0, json: !!rest?.response_format } }); } catch {}
       const data = await r.json();
       return asJson ? data : (data?.choices?.[0]?.message?.content ?? '');
     } finally { clearTimeout(t); }
@@ -154,11 +166,16 @@ export async function chat(payload, client) {
       let log = (globalThis && globalThis.__PANEL_LOG__);
       if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
       if (log && Array.isArray(log)) {
-        log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai' } });
+        log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai', json: !!extra?.response_format } });
       }
     } catch {}
+    const t0 = Date.now();
     const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const ms = Date.now() - t0;
+    if (!r.ok) {
+      try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:error', url, model: selectedModel, ok: false, status: r.status, ms }); } catch {}
+      throw new Error(`HTTP ${r.status}`);
+    }
     const data = await r.json();
     // Augment metadata to help UI match requested vs served model
     try {
@@ -173,7 +190,7 @@ export async function chat(payload, client) {
     } catch {}
     try {
       const log = (globalThis && globalThis.__PANEL_LOG__);
-      if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:response', url, model: data?.model || null, ok: true });
+      if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:response', url, model: data?.model || null, ok: true, ms });
     } catch {}
     return data;
   } finally {
@@ -189,7 +206,12 @@ export async function image(prompt, options, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   const referrer = resolveReferrer();
   const { width = 1024, height = 1024, model = 'flux', nologo = true, seed = null } = options || {};
-  const arr = await c.generate_image(String(prompt || '').trim(), { width, height, model, nologo, seed: seed == null ? undefined : seed, referrer });
+  const meta = { width, height, model, nologo, seed: seed == null ? undefined : seed };
+  try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'image:request', prompt_len: String(prompt || '').length, meta, referrer: referrer || null }); } catch {}
+  const t0 = Date.now();
+  const arr = await c.generate_image(String(prompt || '').trim(), { ...meta, referrer });
+  const ms = Date.now() - t0;
+  try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'image:response', ok: true, ms, meta }); } catch {}
   const contentType = 'image/jpeg';
   function toBase64FromArrayBuffer(buf) {
     if (typeof Buffer !== 'undefined') return Buffer.from(buf).toString('base64');
