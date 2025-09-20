@@ -788,13 +788,15 @@ async function handleChatResponse(initialResponse, model, endpoint) {
       } else {
         // Extract any polli-image directives and render images (legacy fallback)
         const { cleaned, directives } = extractPolliImagesFromText(textContent);
-        const assistantMessage = addMessage({
-          role: 'assistant',
-          type: 'text',
-          content: cleaned || textContent,
-        });
-        if (state.voicePlayback && els.voiceSelect.value) {
-          void speakMessage(assistantMessage, { autoplay: true });
+        if (cleaned && cleaned.trim().length) {
+          const assistantMessage = addMessage({
+            role: 'assistant',
+            type: 'text',
+            content: cleaned,
+          });
+          if (state.voicePlayback && els.voiceSelect.value) {
+            void speakMessage(assistantMessage, { autoplay: true });
+          }
         }
         if (Array.isArray(directives) && directives.length) {
           for (const d of directives) {
