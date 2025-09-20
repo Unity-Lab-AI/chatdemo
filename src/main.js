@@ -642,7 +642,12 @@ async function handleChatResponse(initialResponse, model, endpoint) {
     const textContent = normalizeContent(message.content);
     if (textContent) {
       const json = safeJsonParse(textContent);
-      if (json && typeof json === 'object') {
+      const looksRenderableJson = json && typeof json === 'object' && (
+        (typeof json.text === 'string' && json.text.trim().length) ||
+        (Array.isArray(json.code) && json.code.length) ||
+        (Array.isArray(json.images) && json.images.length)
+      );
+      if (looksRenderableJson) {
         await renderFromJsonPayload(json);
       } else {
         // Extract any polli-image directives and render images (legacy fallback)
