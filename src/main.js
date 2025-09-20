@@ -580,7 +580,7 @@ async function sendPrompt(prompt) {
   try {
     setStatus('Waiting for the model…');
     const pinnedId = state.pinnedModelId || selectedModel.id;
-    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints);
+    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints, { wantsJson: true });
     state.activeModel = { id: pinnedId, endpoint, info: selectedModel };
     if (!state.pinnedModelId) {
       state.pinnedModelId = pinnedId;
@@ -968,7 +968,7 @@ function shouldIncludeTools(_model, _endpoint) {
   return false;
 }
 
-async function requestChatCompletion(model, endpoints) {
+async function requestChatCompletion(model, endpoints, opts = {}) {
   if (!model) {
     throw new Error('No model selected.');
   }
@@ -979,16 +979,36 @@ async function requestChatCompletion(model, endpoints) {
   const attemptErrors = [];
   for (const endpoint of endpoints) {
     try {
-      const response = await chat(
-        {
-          model: model.id,
-          endpoint,
-          messages: state.conversation,
-          response_format: { type: 'json_object' },
-          ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
-        },
-        client,
-      );
+      let includeJson = !!opts.wantsJson;
+      let response;
+      try {
+        response = await chat(
+          {
+            model: model.id,
+            endpoint,
+            messages: state.conversation,
+            ...(includeJson ? { response_format: { type: 'json_object' } } : {}),
+            ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
+          },
+          client,
+        );
+      } catch (err) {
+        if (includeJson) {
+          // Retry without JSON mode if the endpoint/model rejects it
+          includeJson = false;
+          response = await chat(
+            {
+              model: model.id,
+              endpoint,
+              messages: state.conversation,
+              ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
+            },
+            client,
+          );
+        } else {
+          throw err;
+        }
+      }
       if (!response?.model) {
         return { response, endpoint };
       }
