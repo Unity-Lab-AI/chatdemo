@@ -101,12 +101,6 @@ const DEBUG = (() => {
     return u.searchParams.get('debug') === '1' || /(?:^|[#&?])debug(?:=1)?(?:&|$)/.test(location.href);
   } catch { return false; }
 })();
-const FORCE_JSON = (() => {
-  try {
-    const u = new URL(location.href);
-    return u.searchParams.get('json') === '1' || u.searchParams.get('structured') === '1';
-  } catch { return false; }
-})();
 
 // Ensure users get the newest build even with aggressive caches
 void (async function ensureFreshBuild() {
@@ -241,7 +235,7 @@ function renderDebugPanel(extra = {}) {
   const showPayloads = !!document.querySelector('#dbgShowPayloads')?.checked;
   const ua = navigator.userAgent;
   const url = location.href;
-  const jsonMode = !!FORCE_JSON;
+  const jsonMode = false;
   const payload = {
     version: rev,
     referrer: ref,
@@ -314,8 +308,7 @@ async function runHealthCheck() {
     if (!client) throw new Error('Client not ready.');
     setStatus('Running health check…');
     const messages = [{ role: 'user', content: 'Return the word OK.' }];
-    const wantsJson = FORCE_JSON || false;
-    const payload = { model: model.id, endpoint: 'openai', messages, ...(wantsJson ? { response_format: { type: 'json_object' } } : {}) };
+    const payload = { model: model.id, endpoint: 'openai', messages };
     const started = Date.now();
     const resp = await chat(payload, client);
     const ms = Date.now() - started;
@@ -724,7 +717,7 @@ async function sendPrompt(prompt) {
   try {
     setStatus('Waiting for the model…');
     const pinnedId = state.pinnedModelId || selectedModel.id;
-    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints, { wantsJson: FORCE_JSON });
+    const { response, endpoint } = await requestChatCompletion({ ...selectedModel, id: pinnedId }, endpoints);
     state.activeModel = { id: pinnedId, endpoint, info: selectedModel };
     if (!state.pinnedModelId) {
       state.pinnedModelId = pinnedId;
@@ -1117,7 +1110,7 @@ function shouldIncludeTools(_model, _endpoint) {
   return false;
 }
 
-async function requestChatCompletion(model, endpoints, opts = {}) {
+async function requestChatCompletion(model, endpoints) {
   if (!model) {
     throw new Error('No model selected.');
   }
@@ -1128,36 +1121,15 @@ async function requestChatCompletion(model, endpoints, opts = {}) {
   const attemptErrors = [];
   for (const endpoint of endpoints) {
     try {
-      let includeJson = !!opts.wantsJson;
-      let response;
-      try {
-        response = await chat(
-          {
-            model: model.id,
-            endpoint,
-            messages: state.conversation,
-            ...(includeJson ? { response_format: { type: 'json_object' } } : {}),
-            ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
-          },
-          client,
-        );
-      } catch (err) {
-        if (includeJson) {
-          // Retry without JSON mode if the endpoint/model rejects it
-          includeJson = false;
-          response = await chat(
-            {
-              model: model.id,
-              endpoint,
-              messages: state.conversation,
-              ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
-            },
-            client,
-          );
-        } else {
-          throw err;
-        }
-      }
+      const response = await chat(
+        {
+          model: model.id,
+          endpoint,
+          messages: state.conversation,
+          ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
+        },
+        client,
+      );
       if (!response?.model) {
         return { response, endpoint };
       }
