@@ -29,10 +29,18 @@ export class PolliClient {
     const r = await this.fetch(url, { method: 'GET' });
     const ms = Date.now() - t0;
     if (!r.ok) {
-      try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'models:error', url, ok: false, status: r.status, ms }); } catch {}
+      try {
+        let log = (globalThis && globalThis.__PANEL_LOG__);
+        if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
+        if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'models:error', url, ok: false, status: r.status, ms });
+      } catch {}
       throw new Error(`HTTP ${r.status}`);
     }
-    try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'models:response', url, ok: true, ms, type: kind }); } catch {}
+    try {
+      let log = (globalThis && globalThis.__PANEL_LOG__);
+      if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
+      if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'models:response', url, ok: true, ms, type: kind });
+    } catch {}
     const json = await r.json();
     return normalizeModels(json);
   }

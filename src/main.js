@@ -16,21 +16,22 @@ const FALLBACK_MODELS = [
 
 const FALLBACK_VOICES = [];
 const DEFAULT_STATUS = 'Ready.';
-const INJECTED_USER_PRIMER = `Formatting directive (output structure only):
+const INJECTED_USER_PRIMER = `Formatting directive (output format only; does not change your tone or behavior):
 
-- Do not generate any image unless the user explicitly asks for an image.
-- Prefer returning a single JSON object with these optional keys when applicable:
+- You can cause an image to be generated when the user asks for one.
+- When the user asks for an image, prefer returning a single JSON object with keys:
   {
-    "text": string,                     // assistant's prose (optional)
-    "code": [                           // zero or more code blocks (optional)
+    "text": string,                     // your explanation (optional)
+    "code": [                           // code blocks to show (optional)
       { "language": string, "content": string }
     ],
-    "images": [                         // zero or more images to render (optional; only if user asked)
+    "images": [                         // one or more images to generate (only if asked)
       { "prompt": string, "width": int?, "height": int?, "size": string?, "aspect_ratio": string?, "model": string?, "caption": string?, "seed": number? }
     ]
   }
-- If you cannot or prefer not to return JSON, reply normally as text.
-- This note only affects formatting; it must not change your tone, policy, or behavior.`;
+- If you cannot or prefer not to return JSON, you may instead include exactly one fenced code block with language polli-image whose content is a single JSON object having the fields above (at minimum: prompt).
+- Keep normal prose outside JSON and outside the polli-image code block. Do not put backticks inside JSON.
+- Do not generate any image unless the user explicitly asks for an image.`;
 
 function buildFirstTurnUserMessage(userText) {
   const intro = `The user's first message is below. Follow the formatting directive above only when applicable.`;
@@ -211,6 +212,19 @@ if (DEBUG) {
   if (btnClear) btnClear.addEventListener('click', clearPanelLogs);
   if (btnHealth) btnHealth.addEventListener('click', runHealthCheck); 
   if (chkPayload) chkPayload.addEventListener('change', () => renderDebugPanel());
+
+  // Ensure a log buffer exists and live-refresh the panel
+  try {
+    if (!globalThis.__PANEL_LOG__ || !Array.isArray(globalThis.__PANEL_LOG__)) {
+      globalThis.__PANEL_LOG__ = [];
+    }
+  } catch {}
+  try {
+    if (!globalThis.__DBG_REFRESH__) {
+      globalThis.__DBG_REFRESH__ = setInterval(() => renderDebugPanel(), 1000);
+    }
+  } catch {}
+  renderDebugPanel();
 }
 
 function renderDebugPanel(extra = {}) {
@@ -342,6 +356,7 @@ const state = {
   models: [],
   activeModel: null,
   pinnedModelId: null,
+  imagePrimerSent: false,
   voicePlayback: false,
   statusMessage: DEFAULT_STATUS,
   statusError: false,
@@ -680,11 +695,18 @@ async function sendPrompt(prompt) {
     // First turn: only inject formatting note when the user clearly asked for an image
     if (hasImageIntent(prompt)) {
       state.conversation.push({ role: 'user', content: buildFirstTurnUserMessage(prompt) });
+      state.imagePrimerSent = true;
     } else {
       state.conversation.push({ role: 'user', content: prompt });
     }
   } else {
-    state.conversation.push({ role: 'user', content: prompt });
+    // Later turns: if image intent appears and we haven't sent the primer yet, inline it
+    if (hasImageIntent(prompt) && !state.imagePrimerSent) {
+      state.conversation.push({ role: 'user', content: buildFirstTurnUserMessage(prompt) });
+      state.imagePrimerSent = true;
+    } else {
+      state.conversation.push({ role: 'user', content: prompt });
+    }
   }
   try {
     setStatus('Waiting for the model…');
