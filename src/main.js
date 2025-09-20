@@ -277,6 +277,64 @@ function setLoading(isLoading) {
   }
 }
 
+function safeJsonParse(text) {
+  if (text == null) return null;
+  try {
+    return JSON.parse(String(text));
+  } catch { return null; }
+}
+
+async function renderFromJsonPayload(payload) {
+  try {
+    if (payload == null || typeof payload !== 'object') return;
+    const text = typeof payload.text === 'string' ? payload.text : null;
+    const code = Array.isArray(payload.code) ? payload.code : [];
+    const images = Array.isArray(payload.images) ? payload.images : [];
+
+    let combinedText = '';
+    if (text && text.trim()) combinedText += text.trim();
+    if (code.length) {
+      const fences = code
+        .map(block => {
+          const lang = typeof block?.language === 'string' && block.language.trim() ? block.language.trim() : '';
+          const content = typeof block?.content === 'string' ? block.content : (typeof block?.code === 'string' ? block.code : '');
+          return content ? `\n\n\`\`\`${lang}\n${content}\n\`\`\`\n` : '';
+        })
+        .filter(Boolean)
+        .join('');
+      combinedText += fences;
+    }
+    if (combinedText.trim()) {
+      const msg = addMessage({ role: 'assistant', type: 'text', content: combinedText.trim() });
+      if (state.voicePlayback && els.voiceSelect.value) {
+        void speakMessage(msg, { autoplay: true });
+      }
+    }
+
+    for (const img of images) {
+      try {
+        const prompt = typeof img?.prompt === 'string' ? img.prompt.trim() : '';
+        if (!prompt) continue;
+        const { width, height } = resolveDimensions(img);
+        const caption = String(img.caption ?? prompt).trim() || prompt;
+        const { dataUrl, seed } = await generateImageAsset(prompt, {
+          width,
+          height,
+          model: img.model,
+          seed: img.seed,
+        });
+        addMessage({ role: 'assistant', type: 'image', url: dataUrl, alt: caption, caption });
+        console.info('Rendered image from JSON payload (seed %s).', seed);
+      } catch (err) {
+        console.warn('Failed to render image from JSON payload:', err);
+        addMessage({ role: 'assistant', type: 'error', content: String(err?.message ?? err) });
+      }
+    }
+  } catch (error) {
+    console.warn('renderFromJsonPayload error, falling back to text', error);
+  }
+}
+
 function tokenizeMarkdownBlocks(text) {
   const tokens = [];
   const re = /```([a-zA-Z0-9_-]*)\s*\r?\n([\s\S]*?)\r?\n?```/g;
@@ -582,38 +640,43 @@ async function handleChatResponse(initialResponse, model, endpoint) {
 
     const textContent = normalizeContent(message.content);
     if (textContent) {
-      // Extract any polli-image directives and render images
-      const { cleaned, directives } = extractPolliImagesFromText(textContent);
-      const assistantMessage = addMessage({
-        role: 'assistant',
-        type: 'text',
-        content: cleaned || textContent,
-      });
-      if (state.voicePlayback && els.voiceSelect.value) {
-        void speakMessage(assistantMessage, { autoplay: true });
-      }
-      if (Array.isArray(directives) && directives.length) {
-        for (const d of directives) {
-          try {
-            const { width, height } = resolveDimensions(d);
-            const caption = String(d.caption ?? d.prompt).trim() || d.prompt;
-            const { dataUrl, seed } = await generateImageAsset(d.prompt, {
-              width,
-              height,
-              model: d.model,
-              seed: d.seed,
-            });
-            addMessage({
-              role: 'assistant',
-              type: 'image',
-              url: dataUrl,
-              alt: caption,
-              caption,
-            });
-            console.info('Rendered image from polli-image block (seed %s).', seed);
-          } catch (err) {
-            console.warn('Failed to render polli-image block:', err);
-            addMessage({ role: 'assistant', type: 'error', content: String(err?.message ?? err) });
+      const json = safeJsonParse(textContent);
+      if (json && typeof json === 'object') {
+        await renderFromJsonPayload(json);
+      } else {
+        // Extract any polli-image directives and render images (legacy fallback)
+        const { cleaned, directives } = extractPolliImagesFromText(textContent);
+        const assistantMessage = addMessage({
+          role: 'assistant',
+          type: 'text',
+          content: cleaned || textContent,
+        });
+        if (state.voicePlayback && els.voiceSelect.value) {
+          void speakMessage(assistantMessage, { autoplay: true });
+        }
+        if (Array.isArray(directives) && directives.length) {
+          for (const d of directives) {
+            try {
+              const { width, height } = resolveDimensions(d);
+              const caption = String(d.caption ?? d.prompt).trim() || d.prompt;
+              const { dataUrl, seed } = await generateImageAsset(d.prompt, {
+                width,
+                height,
+                model: d.model,
+                seed: d.seed,
+              });
+              addMessage({
+                role: 'assistant',
+                type: 'image',
+                url: dataUrl,
+                alt: caption,
+                caption,
+              });
+              console.info('Rendered image from polli-image block (seed %s).', seed);
+            } catch (err) {
+              console.warn('Failed to render polli-image block:', err);
+              addMessage({ role: 'assistant', type: 'error', content: String(err?.message ?? err) });
+            }
           }
         }
       }
@@ -921,6 +984,7 @@ async function requestChatCompletion(model, endpoints) {
           model: model.id,
           endpoint,
           messages: state.conversation,
+          response_format: { type: 'json_object' },
           ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
         },
         client,

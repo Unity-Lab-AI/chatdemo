@@ -144,6 +144,7 @@ export async function chat(payload, client) {
     ...(referrer ? { referrer } : {}),
     ...(extra.seed != null ? { seed: extra.seed } : {}),
     ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
+    ...(extra.response_format ? { response_format: extra.response_format } : (extra.jsonMode ? { response_format: { type: 'json_object' } } : {})),
   };
 
   const controller = new AbortController();
