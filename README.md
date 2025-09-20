@@ -57,3 +57,15 @@ models while gated Pollinations models remain unavailable until a token is suppl
 
 All chat and image requests automatically include a random eight-digit `seed` parameter so they
 match Pollinations' expected request format.
+
+
+## Project structure
+
+- `src/` — app entrypoints and styles; core helpers live under `src/lib/`.
+- `Libs/pollilib/` — compatibility import surface for the bundled PolliLib client.
+- `libs/PolliLib/` — vendored PolliLib submodule (JavaScript + Python sources).
+- `public/` — static assets served at the web root (e.g. `sw.js`).
+- `tools/` — local build/test utilities invoked by CI and npm scripts.
+- `tests/` — self-contained integration tests (run via `npm test`).
+- `reports/` — artifacts from tests and model checks.
+- `docs/` — API docs and miscellaneous notes.

@@ -1,4 +1,4 @@
-// Compatibility wrapper for browser + Node usage without requiring tokens.
+// Lightweight browser/node client and helpers for Pollinations.
 // Exposes: PolliClient (lite), textModels, chat, image, DEFAULT_REFERRER
 
 export const DEFAULT_REFERRER = 'https://www.unityailab.com';
@@ -64,7 +64,7 @@ export class PolliClient {
   }
 
   async chat_completion(messages, { model = 'openai', referrer = null, asJson = true, timeoutMs = this.timeoutMs, ...rest } = {}) {
-    const url = `${this.textPromptBase}/${model}`;
+    const url = `${this.textPromptBase}/openai`;
     const payload = { model, messages, ...(referrer ? { referrer } : {}), ...rest };
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -83,7 +83,7 @@ export class PolliClient {
   }
 
   async chat_completion_tools(messages, { tools, tool_choice = 'auto', model = 'openai', referrer = null, asJson = true, timeoutMs = this.timeoutMs, ...rest } = {}) {
-    const url = `${this.textPromptBase}/${model}`;
+    const url = `${this.textPromptBase}/openai`;
     const payload = { model, messages, tools, tool_choice, ...(referrer ? { referrer } : {}), ...rest };
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -95,16 +95,18 @@ export class PolliClient {
     } finally { clearTimeout(t); }
   }
 
-  async generate_image(prompt, { width = 1024, height = 1024, model = 'flux', nologo = true, seed = null, referrer = null, timeoutMs = 120_000 } = {}) {
-    const params = new URLSearchParams({ width: String(width), height: String(height), model: String(model) });
-    if (nologo) params.set('nologo', 'true');
-    if (seed != null) params.set('seed', String(seed));
-    if (referrer) params.set('referrer', referrer);
-    const url = `${this.imagePromptBase}/${encodeURIComponent(String(prompt))}?${params}`;
+  async generate_image(prompt, { width = 1024, height = 1024, model = 'flux', nologo = true, seed = null, referrer = null, timeoutMs = this.timeoutMs } = {}) {
+    const u = new URL(`${this.imagePromptBase}/${encodeURIComponent(String(prompt || '').trim())}`);
+    u.searchParams.set('width', String(width));
+    u.searchParams.set('height', String(height));
+    u.searchParams.set('model', model);
+    if (nologo) u.searchParams.set('nologo', 'true');
+    if (seed != null) u.searchParams.set('seed', String(seed));
+    if (referrer) u.searchParams.set('referrer', referrer);
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const r = await this.fetch(url, { method: 'GET', signal: controller.signal });
+      const r = await this.fetch(u, { method: 'GET', signal: controller.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return await r.arrayBuffer();
     } finally { clearTimeout(t); }
@@ -113,32 +115,11 @@ export class PolliClient {
 
 function resolveReferrer() {
   try {
-    // Prefer meta override
-    if (typeof document !== 'undefined' && document?.querySelector) {
-      const names = ['polli-referrer', 'pollinations-referrer'];
-      for (const name of names) {
-        const meta = document.querySelector(`meta[name="${name}"]`);
-        if (meta) {
-          const v = meta.getAttribute('content');
-          if (typeof v === 'string' && v.trim()) return v.trim();
-        }
-      }
-    }
-    // Window globals
-    if (typeof window !== 'undefined') {
-      const winVals = [window.POLLI_REFERRER, window.__POLLI_REFERRER__];
-      for (const v of winVals) {
-        if (typeof v === 'string' && v.trim()) return v.trim();
-      }
-    }
-    // Env (Vite or Node)
-    const env = (typeof import.meta !== 'undefined' && import.meta && import.meta.env) ? import.meta.env : undefined;
-    const penv = (typeof process !== 'undefined' && process?.env) ? process.env : undefined;
-    const envVals = [env?.VITE_POLLI_REFERRER, env?.POLLI_REFERRER, penv?.VITE_POLLI_REFERRER, penv?.POLLI_REFERRER];
+    const env = (typeof process !== 'undefined' ? (process.env || {}) : {});
+    const envVals = [env?.VITE_POLLI_REFERRER, env?.POLLI_REFERRER];
     for (const v of envVals) {
       if (typeof v === 'string' && v.trim()) return v.trim();
     }
-    // Page origin
     if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
     if (typeof document !== 'undefined' && document.location?.origin) return document.location.origin;
   } catch {}
@@ -155,7 +136,6 @@ export async function chat(payload, client) {
   const referrer = resolveReferrer();
   const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...extra } = payload || {};
 
-  // Per APIDOCS: OpenAI-compatible POST endpoint
   const url = `${c.textPromptBase}/openai`;
   const filteredMessages = Array.isArray(messages) ? messages.filter(m => !m || typeof m !== 'object' || m.role !== 'system') : [];
   const body = {
@@ -185,7 +165,6 @@ export async function chat(payload, client) {
       throw new Error(`HTTP ${r.status}`);
     }
     const data = await r.json();
-    // Augment metadata to help UI match requested vs served model
     try {
       if (data && typeof data === 'object') {
         const meta = data.metadata && typeof data.metadata === 'object' ? data.metadata : (data.metadata = {});
@@ -232,5 +211,3 @@ export async function image(prompt, options, client) {
   }
   return { toDataUrl() { return `data:${contentType};base64,${toBase64FromArrayBuffer(arr)}`; } };
 }
-
-
