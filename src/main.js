@@ -788,14 +788,10 @@ function buildEndpointSequence(model) {
 }
 
 
-function shouldIncludeTools(model, endpoint) {
-  const id = String(model?.id || '').toLowerCase();
-  const ep = String(endpoint || '').toLowerCase();
-  // Avoid tools for seed-family/community models where function-calling may alter routing/behavior
-  const seedFamily = /(unity|flux|kontext|chatdolphin|hunyuan|kling|blackforest)/i.test(id);
-  if (seedFamily) return false;
-  // Prefer tools only for openai-like routes
-  return ep === 'openai' || /openai|gpt|claude|mistral|llama|deepseek|grok/i.test(id);
+function shouldIncludeTools(_model, _endpoint) {
+  // Apply the same behavior to all models as for unity: do not attach tools.
+  // Image generation remains available via the explicit "/image" command path.
+  return false;
 }
 
 async function requestChatCompletion(model, endpoints) {
