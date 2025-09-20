@@ -474,8 +474,7 @@ async function handleChatResponse(initialResponse, model, endpoint) {
           model: model.id,
           endpoint,
           messages: state.conversation,
-          tools: [IMAGE_TOOL],
-          tool_choice: 'auto',
+          ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
         },
         client,
       );
@@ -784,6 +783,16 @@ function buildEndpointSequence(model) {
 }
 
 
+function shouldIncludeTools(model, endpoint) {
+  const id = String(model?.id || '').toLowerCase();
+  const ep = String(endpoint || '').toLowerCase();
+  // Avoid tools for seed-family/community models where function-calling may alter routing/behavior
+  const seedFamily = /(unity|flux|kontext|chatdolphin|hunyuan|kling|blackforest)/i.test(id);
+  if (seedFamily) return false;
+  // Prefer tools only for openai-like routes
+  return ep === 'openai' || /openai|gpt|claude|mistral|llama|deepseek|grok/i.test(id);
+}
+
 async function requestChatCompletion(model, endpoints) {
   if (!model) {
     throw new Error('No model selected.');
@@ -800,8 +809,7 @@ async function requestChatCompletion(model, endpoints) {
           model: model.id,
           endpoint,
           messages: state.conversation,
-          tools: [IMAGE_TOOL],
-          tool_choice: 'auto',
+          ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
         },
         client,
       );
