@@ -1,6 +1,6 @@
 {
   "name": "unitychatdemo",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "A demo application for PolliLib and the unity chat bot",
   "main": "index.js",
   "type": "module",
