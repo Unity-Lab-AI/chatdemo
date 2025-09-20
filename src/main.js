@@ -16,10 +16,10 @@ const FALLBACK_MODELS = [
 
 const FALLBACK_VOICES = [];
 const DEFAULT_STATUS = 'Ready.';
-const INJECTED_USER_PRIMER = `Formatting directive (not instruction about tone):
+const INJECTED_USER_PRIMER = `Formatting directive (for output structure only):
 
-- If you choose to produce an image, include exactly one fenced code block with language polli-image whose content is a single JSON object with keys:
-  prompt (string, required), width (int, optional), height (int, optional), size (string WxH, optional), aspect_ratio (like 16:9, optional), model (string, optional), caption (string, optional).
+- Do not generate any image unless the user explicitly asks for an image.
+- If (and only if) an image is requested, include exactly one fenced code block with language polli-image whose content is a single JSON object with keys: prompt (string, required), width (int, optional), height (int, optional), size (string WxH, optional), aspect_ratio (like 16:9, optional), model (string, optional), caption (string, optional).
   Example:
   \`\`\`polli-image
   {"prompt":"a calico cat reading a book, studio lighting","width":1024,"height":1024,"model":"flux","caption":"Calico cat reading"}
@@ -29,7 +29,12 @@ const INJECTED_USER_PRIMER = `Formatting directive (not instruction about tone):
   \`\`\`js
   console.log('hello');
   \`\`\`
-- This only affects formatting; do not change your content, style, or behavior.`;
+- This note only affects formatting; it must not change your tone, policy, or behavior.`;
+
+function buildFirstTurnUserMessage(userText) {
+  const intro = `The user's first message is below. Follow the formatting directive above only when applicable.`;
+  return `${INJECTED_USER_PRIMER}\n\n${intro}\n\n${userText}`;
+}
 const IMAGE_TOOL = {
   type: 'function',
   function: {
@@ -497,10 +502,11 @@ async function sendPrompt(prompt) {
   }
   const startingLength = state.conversation.length;
   if (state.conversation.length === 0) {
-    // Inject a primer as a user message on the very first turn
-    state.conversation.push({ role: 'user', content: INJECTED_USER_PRIMER });
+    // First turn: combine formatting note with the user's first message
+    state.conversation.push({ role: 'user', content: buildFirstTurnUserMessage(prompt) });
+  } else {
+    state.conversation.push({ role: 'user', content: prompt });
   }
-  state.conversation.push({ role: 'user', content: prompt });
   try {
     setStatus('Waiting for the model…');
     const pinnedId = state.pinnedModelId || selectedModel.id;
