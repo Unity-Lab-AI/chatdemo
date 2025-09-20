@@ -16,32 +16,20 @@ const FALLBACK_MODELS = [
 
 const FALLBACK_VOICES = [];
 const DEFAULT_STATUS = 'Ready.';
-const INJECTED_USER_PRIMER = `You are an AI assistant inside a web app. Follow these formatting rules so the app can render images and code correctly.
+const INJECTED_USER_PRIMER = `Formatting directive (not instruction about tone):
 
-Images:
-- When you decide an image would help, include exactly one fenced code block with language "polli-image" that contains a single JSON object.
-- The object must use these keys:
-  - prompt (string, required)
-  - width (integer, optional)
-  - height (integer, optional)
-  - size (string WxH like "1024x768", optional)
-  - aspect_ratio (string like "16:9", optional)
-  - model (string, optional)
-  - caption (string, optional)
-- Example:
-\`\`\`polli-image
-{"prompt":"a calico cat reading a book, studio lighting","width":1024,"height":1024,"model":"flux","caption":"Calico cat reading"}
-\`\`\`
-- Keep your normal explanation text outside the code block. Do not include backticks inside the JSON. Do not use tools/functions.
-
-Code:
-- Use standard Markdown fenced code blocks with a language, e.g.:
-\`\`\`js
-console.log('hello');
-\`\`\`
-- Do not place commentary inside the fence; keep prose outside.
-
-Never include system/meta policy text. Reply conversationally while following the above formatting.`;
+- If you choose to produce an image, include exactly one fenced code block with language polli-image whose content is a single JSON object with keys:
+  prompt (string, required), width (int, optional), height (int, optional), size (string WxH, optional), aspect_ratio (like 16:9, optional), model (string, optional), caption (string, optional).
+  Example:
+  \`\`\`polli-image
+  {"prompt":"a calico cat reading a book, studio lighting","width":1024,"height":1024,"model":"flux","caption":"Calico cat reading"}
+  \`\`\`
+- Keep normal prose outside that code block. Do not include backticks inside the JSON.
+- For code examples, use standard fenced code blocks with a language, e.g.:
+  \`\`\`js
+  console.log('hello');
+  \`\`\`
+- This only affects formatting; do not change your content, style, or behavior.`;
 const IMAGE_TOOL = {
   type: 'function',
   function: {
@@ -313,7 +301,13 @@ function extractPolliImagesFromText(text) {
     kept.push(t);
   }
   const cleaned = kept
-    .map(t => (t.type === 'code' ? `\n\n[ code omitted ]\n\n` : t.text))
+    .map(t => {
+      if (t.type === 'code') {
+        const lang = t.lang ? t.lang : '';
+        return `\n\n\`\`\`${lang}\n${t.content}\n\`\`\`\n\n`;
+      }
+      return t.text;
+    })
     .join('');
   return { cleaned, directives };
 }
