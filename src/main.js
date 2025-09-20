@@ -16,19 +16,20 @@ const FALLBACK_MODELS = [
 
 const FALLBACK_VOICES = [];
 const DEFAULT_STATUS = 'Ready.';
-const INJECTED_USER_PRIMER = `Formatting directive (for output structure only):
+const INJECTED_USER_PRIMER = `Formatting directive (output structure only):
 
 - Do not generate any image unless the user explicitly asks for an image.
-- If (and only if) an image is requested, include exactly one fenced code block with language polli-image whose content is a single JSON object with keys: prompt (string, required), width (int, optional), height (int, optional), size (string WxH, optional), aspect_ratio (like 16:9, optional), model (string, optional), caption (string, optional).
-  Example:
-  \`\`\`polli-image
-  {"prompt":"a calico cat reading a book, studio lighting","width":1024,"height":1024,"model":"flux","caption":"Calico cat reading"}
-  \`\`\`
-- Keep normal prose outside that code block. Do not include backticks inside the JSON.
-- For code examples, use standard fenced code blocks with a language, e.g.:
-  \`\`\`js
-  console.log('hello');
-  \`\`\`
+- Prefer returning a single JSON object with these optional keys when applicable:
+  {
+    "text": string,                     // assistant's prose (optional)
+    "code": [                           // zero or more code blocks (optional)
+      { "language": string, "content": string }
+    ],
+    "images": [                         // zero or more images to render (optional; only if user asked)
+      { "prompt": string, "width": int?, "height": int?, "size": string?, "aspect_ratio": string?, "model": string?, "caption": string?, "seed": number? }
+    ]
+  }
+- If you cannot or prefer not to return JSON, reply normally as text.
 - This note only affects formatting; it must not change your tone, policy, or behavior.`;
 
 function buildFirstTurnUserMessage(userText) {
