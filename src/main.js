@@ -16,6 +16,32 @@ const FALLBACK_MODELS = [
 
 const FALLBACK_VOICES = [];
 const DEFAULT_STATUS = 'Ready.';
+const INJECTED_USER_PRIMER = `You are an AI assistant inside a web app. Follow these formatting rules so the app can render images and code correctly.
+
+Images:
+- When you decide an image would help, include exactly one fenced code block with language "polli-image" that contains a single JSON object.
+- The object must use these keys:
+  - prompt (string, required)
+  - width (integer, optional)
+  - height (integer, optional)
+  - size (string WxH like "1024x768", optional)
+  - aspect_ratio (string like "16:9", optional)
+  - model (string, optional)
+  - caption (string, optional)
+- Example:
+\`\`\`polli-image
+{"prompt":"a calico cat reading a book, studio lighting","width":1024,"height":1024,"model":"flux","caption":"Calico cat reading"}
+\`\`\`
+- Keep your normal explanation text outside the code block. Do not include backticks inside the JSON. Do not use tools/functions.
+
+Code:
+- Use standard Markdown fenced code blocks with a language, e.g.:
+\`\`\`js
+console.log('hello');
+\`\`\`
+- Do not place commentary inside the fence; keep prose outside.
+
+Never include system/meta policy text. Reply conversationally while following the above formatting.`;
 const IMAGE_TOOL = {
   type: 'function',
   function: {
@@ -250,6 +276,48 @@ function setLoading(isLoading) {
   }
 }
 
+function tokenizeMarkdownBlocks(text) {
+  const tokens = [];
+  const re = /```([a-zA-Z0-9_-]*)\s*\r?\n([\s\S]*?)\r?\n?```/g;
+  let lastIndex = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const before = text.slice(lastIndex, m.index);
+    if (before) tokens.push({ type: 'paragraph', text: before });
+    tokens.push({ type: 'code', lang: (m[1] || '').toLowerCase(), content: m[2] || '' });
+    lastIndex = re.lastIndex;
+  }
+  const tail = text.slice(lastIndex);
+  if (tail) tokens.push({ type: 'paragraph', text: tail });
+  return tokens;
+}
+
+function extractPolliImagesFromText(text) {
+  const tokens = tokenizeMarkdownBlocks(String(text || ''));
+  const directives = [];
+  const accepted = new Set(['polli-image', 'pollinations.image', 'image']);
+  const kept = [];
+  for (const t of tokens) {
+    if (t.type === 'code' && accepted.has(t.lang)) {
+      const raw = t.content.trim();
+      try {
+        const obj = JSON.parse(raw);
+        if (obj && typeof obj === 'object' && typeof obj.prompt === 'string' && obj.prompt.trim().length) {
+          directives.push(obj);
+          continue; // omit from kept
+        }
+      } catch (e) {
+        console.warn('Invalid polli-image payload (ignored):', e);
+      }
+    }
+    kept.push(t);
+  }
+  const cleaned = kept
+    .map(t => (t.type === 'code' ? `\n\n[ code omitted ]\n\n` : t.text))
+    .join('');
+  return { cleaned, directives };
+}
+
 function disableApplicationControls() {
   const controls = [
     els.sendButton,
@@ -434,6 +502,10 @@ async function sendPrompt(prompt) {
     throw new Error(`No endpoints available for model "${selectedModel.label ?? selectedModel.id}".`);
   }
   const startingLength = state.conversation.length;
+  if (state.conversation.length === 0) {
+    // Inject a primer as a user message on the very first turn
+    state.conversation.push({ role: 'user', content: INJECTED_USER_PRIMER });
+  }
   state.conversation.push({ role: 'user', content: prompt });
   try {
     setStatus('Waiting for the model…');
@@ -498,13 +570,40 @@ async function handleChatResponse(initialResponse, model, endpoint) {
 
     const textContent = normalizeContent(message.content);
     if (textContent) {
+      // Extract any polli-image directives and render images
+      const { cleaned, directives } = extractPolliImagesFromText(textContent);
       const assistantMessage = addMessage({
         role: 'assistant',
         type: 'text',
-        content: textContent,
+        content: cleaned || textContent,
       });
       if (state.voicePlayback && els.voiceSelect.value) {
         void speakMessage(assistantMessage, { autoplay: true });
+      }
+      if (Array.isArray(directives) && directives.length) {
+        for (const d of directives) {
+          try {
+            const { width, height } = resolveDimensions(d);
+            const caption = String(d.caption ?? d.prompt).trim() || d.prompt;
+            const { dataUrl, seed } = await generateImageAsset(d.prompt, {
+              width,
+              height,
+              model: d.model,
+              seed: d.seed,
+            });
+            addMessage({
+              role: 'assistant',
+              type: 'image',
+              url: dataUrl,
+              alt: caption,
+              caption,
+            });
+            console.info('Rendered image from polli-image block (seed %s).', seed);
+          } catch (err) {
+            console.warn('Failed to render polli-image block:', err);
+            addMessage({ role: 'assistant', type: 'error', content: String(err?.message ?? err) });
+          }
+        }
       }
     }
     break;
@@ -580,13 +679,13 @@ async function handleToolCalls(toolCalls) {
   }
 }
 
-async function generateImageAsset(prompt, { width, height, model: imageModel } = {}) {
+async function generateImageAsset(prompt, { width, height, model: imageModel, seed } = {}) {
   setStatus('Generating image…');
   try {
     if (!client) {
       throw new Error('Pollinations client is not ready.');
     }
-    const seed = generateSeed();
+    const resolvedSeed = (typeof seed === 'number' || (typeof seed === 'string' && seed.trim().length)) ? seed : generateSeed();
     const binary = await image(
       prompt,
       {
@@ -594,13 +693,13 @@ async function generateImageAsset(prompt, { width, height, model: imageModel } =
         height,
         model: imageModel,
         nologo: true,
-        seed,
+        seed: resolvedSeed,
       },
       client,
     );
     const dataUrl = binary.toDataUrl();
     resetStatusIfIdle();
-    return { dataUrl, seed };
+    return { dataUrl, seed: resolvedSeed };
   } catch (error) {
     console.error('Image generation failed', error);
     throw error;
