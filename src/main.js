@@ -815,16 +815,12 @@ async function sendPrompt(prompt) {
   }
   const startingLength = state.conversation.length;
   if (state.conversation.length === 0) {
-    // First turn: only inject formatting note when the user clearly asked for an image
-    if (hasImageIntent(prompt)) {
-      state.conversation.push({ role: 'user', content: buildFirstTurnUserMessage(prompt) });
-      state.imagePrimerSent = true;
-    } else {
-      state.conversation.push({ role: 'user', content: prompt });
-    }
+    // Always inject formatting note on first turn to steer models into JSON
+    state.conversation.push({ role: 'user', content: buildFirstTurnUserMessage(prompt) });
+    state.imagePrimerSent = true;
   } else {
-    // Later turns: if image intent appears and we haven't sent the primer yet, inline it
-    if (hasImageIntent(prompt) && !state.imagePrimerSent) {
+    // If the primer was not sent yet (e.g., preloaded convo), inject once
+    if (!state.imagePrimerSent) {
       state.conversation.push({ role: 'user', content: buildFirstTurnUserMessage(prompt) });
       state.imagePrimerSent = true;
     } else {
