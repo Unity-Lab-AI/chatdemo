@@ -16,7 +16,7 @@ const FALLBACK_MODELS = [
   createFallbackModel('mistral', 'Mistral Small (fallback)'),
 ];
 
-const FALLBACK_VOICES = [];
+const FALLBACK_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 const DEFAULT_STATUS = 'Ready.';
 const INJECTED_USER_PRIMER = `Formatting directive (output format only; does not change your tone or behavior):
 
@@ -627,6 +627,7 @@ function disableApplicationControls() {
     els.voicePlayback.checked = false;
   }
   state.voicePlayback = false;
+  cancelCurrentTtsJob();
   els.form.classList.remove('loading');
 }
 
@@ -645,6 +646,7 @@ function resetConversation({ clearMessages = false } = {}) {
     messageIdCounter = 0;
     renderMessages();
   }
+  cancelCurrentTtsJob();
 }
 
 function renderMessages() {
@@ -767,8 +769,13 @@ function enableCopyButtons(root) {
 }
 
 async function speakMessage(_message, _opts = {}) {
-  // TTS is not available in the current JS PolliLib; voice playback disabled.
-  return;
+  try {
+    const voice = els.voiceSelect?.value || '';
+    if (!state.voicePlayback || !voice || !_message || typeof _message.content !== 'string') return;
+    const text = String(_message.content || '').trim();
+    if (!text) return;
+    startVoicePlaybackForMessage(_message, voice);
+  } catch {}
 }
 
 async function playMessageAudio(message) {
@@ -780,6 +787,148 @@ async function playMessageAudio(message) {
     console.error('Audio playback failed', error);
     setStatus(`Unable to play audio: ${error?.message ?? error}`, { error: true });
   }
+}
+
+// -------------------- Voice playback (TTS) --------------------
+let currentTtsJob = null;
+
+function getReferrer() {
+  try {
+    if (globalThis && globalThis.__POLLINATIONS_REFERRER__) return globalThis.__POLLINATIONS_REFERRER__;
+  } catch {}
+  try { return window.location.origin; } catch {}
+  return null;
+}
+
+function stripNonSpokenParts(text) {
+  let s = String(text || '');
+  // Remove fenced code blocks and polli-image blocks
+  s = s.replace(/```[\s\S]*?```/g, ' ');
+  // Remove multiple spaces/newlines
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+function splitIntoSentences(text) {
+  const s = String(text || '').trim();
+  if (!s) return [];
+  // Split on sentence terminators while keeping them attached
+  const parts = [];
+  let buf = '';
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    buf += ch;
+    if (/[\.!?]/.test(ch)) {
+      // consume following closing quotes/brackets if any
+      let j = i + 1;
+      while (j < s.length && /["'\)\]]/.test(s[j])) { buf += s[j]; j += 1; }
+      parts.push(buf.trim());
+      buf = '';
+      i = j - 1;
+    }
+  }
+  if (buf.trim()) parts.push(buf.trim());
+  return parts;
+}
+
+function groupSentences(sentences, groupSize = 2) {
+  const groups = [];
+  for (let i = 0; i < sentences.length; i += groupSize) {
+    groups.push(sentences.slice(i, i + groupSize).join(' '));
+  }
+  return groups;
+}
+
+async function fetchTtsAudioUrl(text, voice) {
+  const ref = getReferrer();
+  const base = 'https://text.pollinations.ai';
+  const u = new URL(base + '/' + encodeURIComponent(text));
+  u.searchParams.set('model', 'openai-audio');
+  u.searchParams.set('voice', String(voice));
+  if (ref) u.searchParams.set('referrer', ref);
+  const resp = await fetch(u.toString(), { method: 'GET' });
+  if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  trackedAudioUrls.add(url);
+  return url;
+}
+
+function cancelCurrentTtsJob() {
+  try {
+    if (!currentTtsJob) return;
+    currentTtsJob.cancelled = true;
+    for (const t of currentTtsJob.timers) clearTimeout(t);
+    currentTtsJob.timers.length = 0;
+    if (currentTtsJob.audio) {
+      try { currentTtsJob.audio.pause(); } catch {}
+      currentTtsJob.audio = null;
+    }
+    currentTtsJob = null;
+  } catch {}
+}
+
+function startVoicePlaybackForMessage(message, voice) {
+  cancelCurrentTtsJob();
+  const raw = stripNonSpokenParts(message.content || '');
+  if (!raw) return;
+  const sentences = splitIntoSentences(raw);
+  if (!sentences.length) return;
+  const groups = groupSentences(sentences, 2);
+
+  const job = {
+    messageId: message.id,
+    voice,
+    groups,
+    idx: 0,
+    queue: [],
+    timers: [],
+    audio: null,
+    cancelled: false,
+  };
+  currentTtsJob = job;
+
+  // Producer: schedule fetches every 3s
+  const scheduleNextFetch = () => {
+    if (job.cancelled) return;
+    if (job.idx >= job.groups.length) return;
+    const chunk = job.groups[job.idx++];
+    (async () => {
+      try {
+        const url = await fetchTtsAudioUrl(chunk, job.voice);
+        job.queue.push({ url, text: chunk });
+        tryStartPlayback(job);
+      } catch (e) {
+        console.warn('TTS fetch failed', e);
+      }
+    })();
+    if (job.idx < job.groups.length) {
+      const t = setTimeout(scheduleNextFetch, 3000);
+      job.timers.push(t);
+    }
+  };
+  scheduleNextFetch();
+}
+
+function tryStartPlayback(job) {
+  if (job.cancelled) return;
+  // If already playing, nothing to do; the 'ended' handler will pick next
+  if (job.audio && !job.audio.ended && !job.audio.paused) return;
+  const next = job.queue.shift();
+  if (!next) return;
+  const audio = new Audio(next.url);
+  job.audio = audio;
+  audio.addEventListener('ended', () => {
+    if (job.cancelled) return;
+    setTimeout(() => {
+      tryStartPlayback(job);
+    }, 200);
+  });
+  audio.addEventListener('error', () => {
+    if (job.cancelled) return;
+    setTimeout(() => tryStartPlayback(job), 200);
+  });
+  void audio.play();
 }
 
 function normalizeContent(content) {
@@ -1606,6 +1755,7 @@ els.voiceButton.addEventListener('click', () => {
 els.voicePlayback.addEventListener('change', () => {
   if (!els.voicePlayback.checked) {
     state.voicePlayback = false;
+    cancelCurrentTtsJob();
     setStatus('Voice playback muted.');
     playbackStatusTimer = window.setTimeout(() => {
       resetStatusIfIdle();
