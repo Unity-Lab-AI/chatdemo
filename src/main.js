@@ -312,7 +312,7 @@ async function runHealthCheck() {
     if (!client) throw new Error('Client not ready.');
     setStatus('Running health check…');
     const messages = [{ role: 'user', content: 'Return the word OK.' }];
-    const payload = { model: model.id, endpoint: 'openai', messages };
+    const payload = { model: model.id, endpoint: 'openai', messages, response_format: { type: 'json_object' } };
     const started = Date.now();
     const resp = await chat(payload, client);
     const ms = Date.now() - started;
@@ -431,9 +431,7 @@ function looseJsonParse(text) {
 async function renderFromJsonPayload(payload) {
   try {
     if (payload == null || typeof payload !== 'object') return;
-    const text = typeof payload.text === 'string' ? payload.text : null;
-    const code = Array.isArray(payload.code) ? payload.code : [];
-    const images = Array.isArray(payload.images) ? payload.images : [];
+    const { text, code, images } = coerceJsonPayload(payload);
 
     let combinedText = '';
     if (text && text.trim()) combinedText += text.trim();
@@ -878,6 +876,7 @@ async function handleChatResponse(initialResponse, model, endpoint) {
           endpoint,
           messages: state.conversation,
           ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
+          response_format: { type: 'json_object' },
         },
         client,
       );
@@ -899,12 +898,17 @@ async function handleChatResponse(initialResponse, model, endpoint) {
       // Track images before/after to know if we need a deeper fallback
       const imagesBefore = state.messages.filter(m => m?.type === 'image').length;
 
-      const json = safeJsonParse(textContent);
-      const looksRenderableJson = json && typeof json === 'object' && (
-        (typeof json.text === 'string' && json.text.trim().length) ||
-        (Array.isArray(json.code) && json.code.length) ||
-        (Array.isArray(json.images) && json.images.length)
-      );
+      let json = safeJsonParse(textContent);
+      if (!json) json = looseJsonParse(textContent);
+      let looksRenderableJson = false;
+      if (json && typeof json === 'object') {
+        const coerced = coerceJsonPayload(json);
+        looksRenderableJson = !!(
+          (coerced.text && coerced.text.trim().length) ||
+          (Array.isArray(coerced.code) && coerced.code.length) ||
+          (Array.isArray(coerced.images) && coerced.images.length)
+        );
+      }
       if (looksRenderableJson) {
         await renderFromJsonPayload(json);
       } else {
@@ -957,11 +961,64 @@ async function handleChatResponse(initialResponse, model, endpoint) {
               console.warn('Failed to render image from loose JSON payload:', err);
             }
           }
+          // As a last resort, if nothing was renderable but we do have a JSON object,
+          // show it back to the user pretty-printed so they see the content.
+          const postImages = state.messages.filter(m => m?.type === 'image').length;
+          if (postImages === imagesBefore && json && typeof json === 'object') {
+            try {
+              const pretty = JSON.stringify(json, null, 2);
+              addMessage({ role: 'assistant', type: 'text', content: '```json\n' + pretty + '\n```' });
+            } catch {}
+          }
         }
       }
     }
     break;
   }
+}
+
+// Normalize arbitrary JSON payloads from models to our app schema
+function coerceJsonPayload(obj) {
+  const result = { text: null, code: [], images: [] };
+  if (!obj || typeof obj !== 'object') return result;
+
+  // Text fields
+  const textKeys = ['text', 'answer', 'response', 'content', 'message', 'explanation', 'summary'];
+  for (const k of textKeys) {
+    if (typeof obj[k] === 'string' && obj[k].trim()) { result.text = obj[k]; break; }
+  }
+
+  // Code fields
+  const addCodeBlock = (block) => {
+    if (!block) return;
+    if (typeof block === 'string') { result.code.push({ language: '', content: block }); return; }
+    if (typeof block === 'object') {
+      const language = typeof block.language === 'string' ? block.language : (typeof block.lang === 'string' ? block.lang : '');
+      const content = typeof block.content === 'string' ? block.content : (typeof block.code === 'string' ? block.code : '');
+      if (content) { result.code.push({ language, content }); }
+    }
+  };
+  if (Array.isArray(obj.code)) obj.code.forEach(addCodeBlock);
+  else if (typeof obj.code === 'string') addCodeBlock(obj.code);
+  if (Array.isArray(obj.blocks)) {
+    for (const b of obj.blocks) {
+      if (b && (b.type === 'code' || b.language || b.lang || typeof b.code === 'string' || typeof b.content === 'string')) addCodeBlock(b);
+    }
+  }
+  if (typeof obj.snippet === 'string') addCodeBlock(obj.snippet);
+  if (typeof obj.program === 'string') addCodeBlock(obj.program);
+  if (typeof obj.script === 'string') addCodeBlock(obj.script);
+
+  // Images fields
+  if (Array.isArray(obj.images)) {
+    for (const im of obj.images) {
+      if (im && typeof im.prompt === 'string' && im.prompt.trim()) result.images.push(im);
+    }
+  } else if (obj.image && typeof obj.image === 'object' && typeof obj.image.prompt === 'string') {
+    result.images.push({ ...obj.image });
+  }
+
+  return result;
 }
 
 async function handleToolCalls(toolCalls) {
@@ -1289,6 +1346,7 @@ async function requestChatCompletion(model, endpoints) {
             endpoint,
             messages: state.conversation,
             ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
+            response_format: { type: 'json_object' },
           },
           client,
         );
