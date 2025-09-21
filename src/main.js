@@ -840,6 +840,44 @@ function groupSentences(sentences, groupSize = 2) {
   return groups;
 }
 
+// Build TTS chunks by character length, prefer ending at sentence boundaries.
+// - maxChars: hard cap per chunk (default 1000)
+// - If a single sentence exceeds max, split it on whitespace near the limit.
+function buildTtsChunks(text, { maxChars = 1000 } = {}) {
+  const sents = splitIntoSentences(text);
+  const chunks = [];
+  let i = 0;
+  while (i < sents.length) {
+    let chunk = '';
+    let added = 0;
+    while (i < sents.length) {
+      const next = sents[i];
+      const sep = chunk ? ' ' : '';
+      if ((chunk.length + sep.length + next.length) <= maxChars) {
+        chunk += sep + next;
+        i += 1;
+        added += 1;
+      } else {
+        break;
+      }
+    }
+    if (!chunk) {
+      // Single long sentence; split within maxChars using last whitespace
+      const long = sents[i];
+      const slice = long.slice(0, maxChars);
+      const cut = Math.max(slice.lastIndexOf(' '), slice.lastIndexOf(','), slice.lastIndexOf(';'));
+      const end = cut > 40 ? cut : maxChars; // avoid cutting too early
+      chunk = slice.slice(0, end).trim();
+      sents[i] = long.slice(end).trim(); // keep remainder as a sentence
+      if (!sents[i]) i += 1;
+    }
+    if (chunk) chunks.push(chunk);
+    // If we added 0 sentences and remainder is empty, break to avoid infinite loop
+    if (!chunk && i >= sents.length) break;
+  }
+  return chunks;
+}
+
 async function fetchTtsAudioUrl(text, voice) {
   const ref = getReferrer();
   const base = 'https://text.pollinations.ai';
@@ -900,20 +938,18 @@ function startVoicePlaybackForMessage(message, voice) {
   cancelCurrentTtsJob();
   const raw = stripNonSpokenParts(message.content || '');
   if (!raw) return;
-  const sentences = splitIntoSentences(raw);
-  if (!sentences.length) return;
-  const groups = groupSentences(sentences, 2);
+  const chunks = buildTtsChunks(raw, { maxChars: 1000 });
+  if (!chunks.length) return;
 
   const job = {
     messageId: message.id,
     voice,
-    groups,
-    // Fetch coordination
+    groups: chunks,
+    // Fetch coordination (paced at ~3s per chunk)
     nextFetchIndex: 0,
-    maxConcurrency: 2,
     inflight: 0,
     // Playback ordering
-    results: new Array(groups.length), // urls by index
+    results: new Array(chunks.length), // urls by index
     playIndex: 0,
     // Misc
     timers: [],
@@ -922,29 +958,31 @@ function startVoicePlaybackForMessage(message, voice) {
   };
   currentTtsJob = job;
 
-  const launchFetches = () => {
+  const scheduleNextFetch = () => {
     if (job.cancelled) return;
-    while (job.inflight < job.maxConcurrency && job.nextFetchIndex < job.groups.length) {
-      const index = job.nextFetchIndex++;
-      job.inflight += 1;
-      (async () => {
-        try {
-          const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
-          if (!job.cancelled) {
-            job.results[index] = url;
-            tryStartPlayback(job);
-          }
-        } catch (e) {
-          if (!job.cancelled) console.warn('TTS fetch failed', e);
-          job.results[index] = null;
-        } finally {
-          job.inflight -= 1;
-          launchFetches();
+    if (job.nextFetchIndex >= job.groups.length) return;
+    const index = job.nextFetchIndex++;
+    job.inflight += 1;
+    (async () => {
+      try {
+        const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
+        if (!job.cancelled) {
+          job.results[index] = url;
+          tryStartPlayback(job);
         }
-      })();
+      } catch (e) {
+        if (!job.cancelled) console.warn('TTS fetch failed', e);
+        job.results[index] = null;
+      } finally {
+        job.inflight -= 1;
+      }
+    })();
+    if (job.nextFetchIndex < job.groups.length) {
+      const t = setTimeout(scheduleNextFetch, 3000);
+      job.timers.push(t);
     }
   };
-  launchFetches();
+  scheduleNextFetch();
 }
 
 function tryStartPlayback(job) {
