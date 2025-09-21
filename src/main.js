@@ -909,6 +909,8 @@ async function fetchTtsAudioUrl(text, voice) {
     if (a.safeFalse) u.searchParams.set('safe', 'false');
     if (a.system) u.searchParams.set('system', 'Speak exactly the provided text verbatim. Do not add, rephrase, or omit any words. Read only the content after the line break.');
     if (ref) u.searchParams.set('referrer', ref);
+    // cache-buster to avoid any gateway caches returning truncated audio
+    u.searchParams.set('cb', String(Date.now()) + Math.random().toString(36).slice(2));
     try {
       const resp = await fetch(u.toString(), { method: 'GET' });
       if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
@@ -1024,6 +1026,7 @@ function tryStartPlayback(job) {
   const audio = new Audio(url);
   audio.preload = 'auto';
   audio.currentTime = 0;
+  try { audio.load(); } catch {}
   job.audio = audio;
   let started = false;
   let watchdog = null;
@@ -1033,8 +1036,10 @@ function tryStartPlayback(job) {
     if (job.cancelled) return;
     audio.play().catch(() => {});
   };
+  audio.addEventListener('loadedmetadata', startPlay, { once: true });
   audio.addEventListener('canplay', startPlay, { once: true });
-  watchdog = setTimeout(startPlay, 800);
+  audio.addEventListener('canplaythrough', startPlay, { once: true });
+  watchdog = setTimeout(startPlay, 1500);
 
   audio.addEventListener('playing', () => {
     if (job.cancelled) return;
@@ -1052,11 +1057,12 @@ function tryStartPlayback(job) {
 
   const stallTimer = setTimeout(() => {
     if (!started) {
+      // Give slower decoders more time; mark as error only after generous grace
       setTtsChunkState(job, index, 'error');
       job.playIndex += 1;
       tryStartPlayback(job);
     }
-  }, 2000);
+  }, 7000);
 
   audio.addEventListener('ended', () => {
     if (job.cancelled) return;
@@ -1187,6 +1193,7 @@ async function handleChatResponse(initialResponse, model, endpoint) {
           messages: state.conversation,
           ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
           response_format: { type: 'json_object' },
+          seed: generateSeed(),
         },
         client,
       );
@@ -1243,7 +1250,7 @@ async function handleChatResponse(initialResponse, model, endpoint) {
         // Secondary salvage: retry once without JSON response_format for long-form text
         try {
           const salvageMessages = state.conversation.slice(0, -1); // drop the empty assistant turn
-          const retryResp = await chat({ model: model.id, endpoint, messages: salvageMessages }, client);
+          const retryResp = await chat({ model: model.id, endpoint, messages: salvageMessages, seed: generateSeed() }, client);
           const retryMsg = retryResp?.choices?.[0]?.message;
           const retryContent = normalizeContent(retryMsg?.content);
           if (retryContent && retryContent.trim()) {
@@ -1699,6 +1706,7 @@ async function requestChatCompletion(model, endpoints) {
             messages: state.conversation,
             ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
             response_format: { type: 'json_object' },
+            seed: generateSeed(),
           },
           client,
         );
