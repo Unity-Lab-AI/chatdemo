@@ -801,6 +801,113 @@ async function playMessageAudio(message) {
 
 // -------------------- Voice playback (TTS) --------------------
 let currentTtsJob = null;
+const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRhYAAABXQVZFZm10IBIAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
+let audioUnlocked = false;
+let audioUnlockPromise = null;
+let lastAudioUnlockWarning = 0;
+
+function isAutoplayError(error) {
+  if (!error) return false;
+  const name = typeof error.name === 'string' ? error.name.toLowerCase() : '';
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : String(error || '').toLowerCase();
+  if (name.includes('notallowed')) return true;
+  return /autoplay|user gesture|user-gesture|gesture|interaction required|notallowed/.test(message);
+}
+
+async function tryUnlockWithAudioContext() {
+  try {
+    const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContextCtor) return false;
+    const ctx = new AudioContextCtor();
+    try {
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      const buffer = ctx.createBuffer(1, 1, ctx.sampleRate || 44100);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(0);
+      if (typeof source.stop === 'function') {
+        try { source.stop(0); } catch {}
+      }
+      await sleep(0);
+      return true;
+    } finally {
+      try { await ctx.close(); } catch {}
+    }
+  } catch (error) {
+    return false;
+  }
+}
+
+async function tryUnlockWithSilentAudio() {
+  try {
+    if (typeof globalThis.Audio !== 'function') return false;
+    const audio = new Audio(SILENT_WAV_DATA_URL);
+    audio.muted = true;
+    audio.volume = 0;
+    await audio.play();
+    audio.pause();
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function unlockAudioPlayback() {
+  if (audioUnlocked) return true;
+  if (audioUnlockPromise) return audioUnlockPromise;
+  if (typeof globalThis === 'undefined') return false;
+  audioUnlockPromise = (async () => {
+    let unlocked = await tryUnlockWithAudioContext();
+    if (!unlocked) {
+      unlocked = await tryUnlockWithSilentAudio();
+    }
+    if (unlocked) {
+      audioUnlocked = true;
+    }
+    return unlocked;
+  })();
+  try {
+    return await audioUnlockPromise;
+  } finally {
+    audioUnlockPromise = null;
+  }
+}
+
+function notifyAudioPlaybackBlocked() {
+  const now = Date.now();
+  if (now - lastAudioUnlockWarning < 3000) return;
+  lastAudioUnlockWarning = now;
+  setStatus('Audio playback was blocked by the browser. Tap anywhere on the page to enable sound and try again.', {
+    error: true,
+  });
+}
+
+async function playAudioWithUnlock(audio) {
+  if (!audio) return;
+  try {
+    await audio.play();
+  } catch (error) {
+    if (!isAutoplayError(error)) {
+      console.warn('Audio playback failed', error);
+      return;
+    }
+    const unlocked = await unlockAudioPlayback();
+    if (!unlocked) {
+      console.warn('Audio playback blocked by browser policies.', error);
+      notifyAudioPlaybackBlocked();
+      return;
+    }
+    try {
+      await audio.play();
+    } catch (retryError) {
+      console.warn('Audio playback failed even after unlock', retryError);
+      notifyAudioPlaybackBlocked();
+    }
+  }
+}
 
 function getReferrer() {
   try {
@@ -1034,17 +1141,21 @@ function tryStartPlayback(job) {
   let watchdog = null;
   const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
 
-  const startPlay = () => {
+  let playbackPromise = null;
+  const attemptPlayback = () => {
     if (job.cancelled) return;
-    audio.play().catch(() => {});
+    if (playbackPromise) return;
+    playbackPromise = playAudioWithUnlock(audio).finally(() => {
+      playbackPromise = null;
+    });
   };
-  audio.addEventListener('loadedmetadata', startPlay, { once: true });
-  audio.addEventListener('loadeddata', startPlay, { once: true });
-  audio.addEventListener('canplay', startPlay, { once: true });
-  audio.addEventListener('canplaythrough', startPlay, { once: true });
-  watchdog = setTimeout(startPlay, 1500);
+  audio.addEventListener('loadedmetadata', attemptPlayback, { once: true });
+  audio.addEventListener('loadeddata', attemptPlayback, { once: true });
+  audio.addEventListener('canplay', attemptPlayback, { once: true });
+  audio.addEventListener('canplaythrough', attemptPlayback, { once: true });
+  watchdog = setTimeout(attemptPlayback, 1500);
   // Also try an immediate kick-off in case events are delayed
-  setTimeout(startPlay, 0);
+  setTimeout(attemptPlayback, 0);
 
   audio.addEventListener('playing', () => {
     if (job.cancelled) return;
@@ -1068,7 +1179,7 @@ function tryStartPlayback(job) {
 
   audio.addEventListener('stalled', () => {
     if (job.cancelled) return;
-    audio.play().catch(() => {});
+    void playAudioWithUnlock(audio);
   });
 
   const stallTimer = setTimeout(() => {
@@ -2008,6 +2119,7 @@ els.voicePlayback.addEventListener('change', () => {
   }
 
   state.voicePlayback = true;
+  void unlockAudioPlayback();
   setStatus(`Voice playback enabled (${els.voiceSelect.value}).`);
   playbackStatusTimer = window.setTimeout(() => {
     resetStatusIfIdle();
