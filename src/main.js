@@ -843,7 +843,9 @@ function groupSentences(sentences, groupSize = 2) {
 async function fetchTtsAudioUrl(text, voice) {
   const ref = getReferrer();
   const base = 'https://text.pollinations.ai';
-  const u = new URL(base + '/' + encodeURIComponent(text));
+  const header = 'Speak only the following text, exactly as it is written:';
+  const combined = `${header}\n${text}`;
+  const u = new URL(base + '/' + encodeURIComponent(combined));
   u.searchParams.set('model', 'openai-audio');
   u.searchParams.set('voice', String(voice));
   // Strong hints to avoid generative behavior and filtering
@@ -853,7 +855,7 @@ async function fetchTtsAudioUrl(text, voice) {
   u.searchParams.set('frequency_penalty', '0');
   u.searchParams.set('safe', 'false');
   // Ask engine to read exactly without paraphrasing (ignored by pure TTS, helpful if model-backed)
-  u.searchParams.set('system', 'Speak exactly the provided text verbatim. Do not add, rephrase, or omit any words.');
+  u.searchParams.set('system', 'Speak exactly the provided text verbatim. Do not add, rephrase, or omit any words. Read only the content after the line break.');
   if (ref) u.searchParams.set('referrer', ref);
   const resp = await fetch(u.toString(), { method: 'GET' });
   if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
@@ -897,26 +899,19 @@ function startVoicePlaybackForMessage(message, voice) {
   };
   currentTtsJob = job;
 
-  // Producer: schedule fetches every 3s
-  const scheduleNextFetch = () => {
-    if (job.cancelled) return;
-    if (job.idx >= job.groups.length) return;
-    const chunk = job.groups[job.idx++];
+  // Producer: fetch all chunks without artificial delay; push to queue as they arrive
+  for (const chunk of job.groups) {
     (async () => {
       try {
         const url = await fetchTtsAudioUrl(chunk, job.voice);
+        if (job.cancelled) return;
         job.queue.push({ url, text: chunk });
         tryStartPlayback(job);
       } catch (e) {
-        console.warn('TTS fetch failed', e);
+        if (!job.cancelled) console.warn('TTS fetch failed', e);
       }
     })();
-    if (job.idx < job.groups.length) {
-      const t = setTimeout(scheduleNextFetch, 3000);
-      job.timers.push(t);
-    }
-  };
-  scheduleNextFetch();
+  }
 }
 
 function tryStartPlayback(job) {
@@ -929,9 +924,7 @@ function tryStartPlayback(job) {
   job.audio = audio;
   audio.addEventListener('ended', () => {
     if (job.cancelled) return;
-    setTimeout(() => {
-      tryStartPlayback(job);
-    }, 200);
+    tryStartPlayback(job);
   });
   audio.addEventListener('error', () => {
     if (job.cancelled) return;

@@ -49,7 +49,12 @@ async function tryChatJson(model, messages, { timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const resp = await chat({ endpoint: 'openai', model, messages, response_format: { type: 'json_object' } }, client);
+    let resp = null;
+    try {
+      resp = await chat({ endpoint: 'openai', model, messages, response_format: { type: 'json_object' } }, client);
+    } catch {
+      return null;
+    }
     const content = resp?.choices?.[0]?.message?.content ?? '';
     try { return JSON.parse(content); } catch { return null; }
   } finally { clearTimeout(t); }
