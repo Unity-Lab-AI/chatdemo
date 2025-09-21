@@ -1,6 +1,7 @@
 import './style.css';
 import 'highlight.js/styles/github.css';
 import { renderMarkdown, enhanceCodeBlocksHtml } from './lib/markdown.js';
+import { looseJsonParse, repairModelOutput } from './lib/json-repair.js';
 import { chat, image, textModels } from '../Libs/pollilib/index.js';
 import { generateSeed } from './seed.js';
 import { createPollinationsClient } from './pollinations-client.js';
@@ -410,7 +411,7 @@ function safeJsonParse(text) {
 // - Removes line and block comments
 // - Replaces smart quotes with standard quotes
 // - Removes trailing commas before } or ]
-function looseJsonParse(text) {
+function __unused_looseJsonParse(text) {
   if (text == null) return null;
   let s = String(text).trim();
   // Remove surrounding code fences if any
@@ -1221,6 +1222,23 @@ async function handleChatResponse(initialResponse, model, endpoint) {
       if (looksRenderableJson) {
         await renderFromJsonPayload(json);
       } else {
+        // Attempt repair: merge multiple JSON objects and capture stray prose
+        try {
+          const repaired = repairModelOutput(textContent, { coerce: coerceJsonPayload });
+          const hasRenderable = !!(
+            repaired && typeof repaired === 'object' && (
+              (repaired.text && repaired.text.trim().length) ||
+              (Array.isArray(repaired.code) && repaired.code.length) ||
+              (Array.isArray(repaired.images) && repaired.images.length)
+            )
+          );
+          if (hasRenderable) {
+            await renderFromJsonPayload(repaired);
+            break;
+          }
+        } catch (e) {
+          console.warn('Repair parse failed; using text fallback', e);
+        }
         // Extract any polli-image directives and render images (legacy fallback)
         const { cleaned, directives } = extractPolliImagesFromText(textContent);
         if (cleaned && cleaned.trim().length) {
