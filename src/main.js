@@ -1,4 +1,6 @@
 import './style.css';
+import 'highlight.js/styles/github.css';
+import { renderMarkdown } from './lib/markdown.js';
 import { chat, image, textModels } from '../Libs/pollilib/index.js';
 import { generateSeed } from './seed.js';
 import { createPollinationsClient } from './pollinations-client.js';
@@ -607,48 +609,29 @@ function renderMessages() {
 }
 
 function renderTextInto(container, text) {
-  const lines = String(text).split(/\n+/);
-  const urlPattern = /(https?:\/\/[^\s]+)/g;
-  for (const line of lines) {
-    const paragraph = document.createElement('p');
-    let hasText = false;
-    const parts = line.split(urlPattern);
-    for (const part of parts) {
-      if (!part) continue;
-      if (/^https?:\/\//.test(part)) {
-        const trimmed = part.replace(/[),.;!?]+$/u, '');
-        const trailing = part.slice(trimmed.length);
-        if (/\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\?.*)?$/i.test(trimmed)) {
-          const wrapper = document.createElement('div');
-          wrapper.className = 'message-image';
-          const img = document.createElement('img');
-          img.src = trimmed;
-          img.alt = 'Image from response';
-          img.loading = 'lazy';
-          wrapper.appendChild(img);
-          container.appendChild(wrapper);
-        } else {
-          hasText = true;
-          const link = document.createElement('a');
-          link.href = trimmed;
-          link.target = '_blank';
-          link.rel = 'noopener noreferrer';
-          link.textContent = trimmed;
-          paragraph.appendChild(link);
-        }
-        if (trailing) {
-          hasText = true;
-          paragraph.appendChild(document.createTextNode(trailing));
-        }
-      } else {
-        hasText = true;
-        paragraph.appendChild(document.createTextNode(part));
-      }
+  const html = renderMarkdown(String(text ?? ''));
+  const wrapper = document.createElement('div');
+  wrapper.className = 'md';
+  wrapper.innerHTML = html;
+
+  // Preserve legacy behavior: turn plain image links into inline images
+  // Find anchor tags whose href looks like an image, replace with image block
+  const anchors = wrapper.querySelectorAll('a[href]');
+  anchors.forEach(a => {
+    const href = String(a.getAttribute('href') || '');
+    if (/\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\?.*)?$/i.test(href)) {
+      const block = document.createElement('div');
+      block.className = 'message-image';
+      const img = document.createElement('img');
+      img.src = href;
+      img.alt = a.textContent || 'Image from response';
+      img.loading = 'lazy';
+      block.appendChild(img);
+      a.replaceWith(block);
     }
-    if (hasText) {
-      container.appendChild(paragraph);
-    }
-  }
+  });
+
+  container.appendChild(wrapper);
 }
 
 async function speakMessage(_message, _opts = {}) {
