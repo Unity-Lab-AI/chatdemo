@@ -37,3 +37,14 @@ export function renderMarkdown(text) {
   return md.render(input);
 }
 
+// Inject a copy button before each fenced code block. This keeps UI wiring simple
+// and lets tests assert on static HTML.
+export function enhanceCodeBlocksHtml(html) {
+  if (!html || typeof html !== 'string') return html || '';
+  if (html.includes('class="code-block"')) return html; // already enhanced
+  const openRe = /<pre>\s*<code/gi;
+  const closeRe = /<\/code>\s*<\/pre>/gi;
+  return html
+    .replace(openRe, '<div class="code-block"><button class="copy-code" type="button" aria-label="Copy code">Copy<\/button><pre><code')
+    .replace(closeRe, '</code></pre></div>');
+}

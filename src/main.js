@@ -1,6 +1,6 @@
 import './style.css';
 import 'highlight.js/styles/github.css';
-import { renderMarkdown } from './lib/markdown.js';
+import { renderMarkdown, enhanceCodeBlocksHtml } from './lib/markdown.js';
 import { chat, image, textModels } from '../Libs/pollilib/index.js';
 import { generateSeed } from './seed.js';
 import { createPollinationsClient } from './pollinations-client.js';
@@ -609,7 +609,7 @@ function renderMessages() {
 }
 
 function renderTextInto(container, text) {
-  const html = renderMarkdown(String(text ?? ''));
+  const html = enhanceCodeBlocksHtml(renderMarkdown(String(text ?? '')));
   const wrapper = document.createElement('div');
   wrapper.className = 'md';
   wrapper.innerHTML = html;
@@ -631,7 +631,47 @@ function renderTextInto(container, text) {
     }
   });
 
+  // Enable copy-to-clipboard on code blocks (event delegation)
+  enableCopyButtons(wrapper);
+
   container.appendChild(wrapper);
+}
+
+function enableCopyButtons(root) {
+  if (!root) return;
+  root.addEventListener('click', async (event) => {
+    const btn = event.target && event.target.closest ? event.target.closest('button.copy-code') : null;
+    if (!btn || !root.contains(btn)) return;
+    const block = btn.closest('.code-block');
+    const codeEl = block ? block.querySelector('pre > code') : null;
+    if (!codeEl) return;
+    const text = codeEl.textContent || '';
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      const prev = btn.textContent;
+      btn.textContent = 'Copied!';
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = prev || 'Copy';
+        btn.disabled = false;
+      }, 1500);
+    } catch (err) {
+      console.warn('Copy failed', err);
+      setStatus('Unable to copy code.', { error: true });
+    }
+  });
 }
 
 async function speakMessage(_message, _opts = {}) {

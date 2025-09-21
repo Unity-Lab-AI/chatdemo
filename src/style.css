@@ -243,25 +243,33 @@ textarea:focus {
 }
 
 /* Code rendering */
-pre.code-block {
+/* Let highlight.js theme handle colors; we add structure and button */
+.md .code-block {
+  position: relative;
   margin: 0.75rem 0;
-  padding: 0.9rem 1rem;
-  border-radius: 12px;
-  background: #0b1020;
-  color: #e6edf3;
-  overflow-x: auto;
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.2);
 }
 
-pre.code-block code[data-lang]::before {
-  content: attr(data-lang);
-  display: inline-block;
-  font-size: 0.7rem;
-  color: #a5b4fc;
-  background: rgba(99, 102, 241, 0.12);
-  border-radius: 6px;
-  padding: 0.1rem 0.4rem;
-  margin-bottom: 0.5rem;
+.md .code-block pre {
+  margin: 0;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.md .copy-code {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #111827;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.md .copy-code:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.14);
 }
 
 code {
