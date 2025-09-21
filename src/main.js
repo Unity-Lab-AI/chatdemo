@@ -1239,6 +1239,30 @@ async function handleChatResponse(initialResponse, model, endpoint) {
         } catch (e) {
           console.warn('Repair parse failed; using text fallback', e);
         }
+
+        // Secondary salvage: retry once without JSON response_format for long-form text
+        try {
+          const salvageMessages = state.conversation.slice(0, -1); // drop the empty assistant turn
+          const retryResp = await chat({ model: model.id, endpoint, messages: salvageMessages }, client);
+          const retryMsg = retryResp?.choices?.[0]?.message;
+          const retryContent = normalizeContent(retryMsg?.content);
+          if (retryContent && retryContent.trim()) {
+            let retryJson = safeJsonParse(retryContent) || looseJsonParse(retryContent);
+            if (retryJson && typeof retryJson === 'object') {
+              try {
+                await renderFromJsonPayload(retryJson);
+              } catch {
+                addMessage({ role: 'assistant', type: 'text', content: retryContent });
+              }
+            } else {
+              addMessage({ role: 'assistant', type: 'text', content: retryContent });
+            }
+            try { state.conversation[state.conversation.length - 1].content = retryMsg?.content ?? retryContent; } catch {}
+            break;
+          }
+        } catch (e) {
+          console.warn('Salvage retry without JSON mode failed', e);
+        }
         // Extract any polli-image directives and render images (legacy fallback)
         const { cleaned, directives } = extractPolliImagesFromText(textContent);
         if (cleaned && cleaned.trim().length) {
