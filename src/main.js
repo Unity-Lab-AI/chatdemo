@@ -850,9 +850,9 @@ function groupSentences(sentences, groupSize = 2) {
 }
 
 // Build TTS chunks by character length, prefer ending at sentence boundaries.
-// - maxChars: hard cap per chunk (default 1000)
+// - maxChars: hard cap per chunk (default 500)
 // - If a single sentence exceeds max, split it on whitespace near the limit.
-function buildTtsChunks(text, { maxChars = 1000 } = {}) {
+function buildTtsChunks(text, { maxChars = 500 } = {}) {
   const sents = splitIntoSentences(text);
   const chunks = [];
   let i = 0;
@@ -947,7 +947,7 @@ function startVoicePlaybackForMessage(message, voice) {
   cancelCurrentTtsJob();
   const raw = stripNonSpokenParts(message.content || '');
   if (!raw) return;
-  const chunks = buildTtsChunks(raw, { maxChars: 1000 });
+  const chunks = buildTtsChunks(raw, { maxChars: 500 });
   if (!chunks.length) return;
 
   const job = {
