@@ -1665,6 +1665,7 @@ async function requestChatCompletion(model, endpoints) {
   const attemptErrors = [];
   for (const endpoint of endpoints) {
     let retried429 = false;
+    let retriedNetwork = false;
     for (;;) {
       try {
         const response = await chat(
@@ -1703,6 +1704,12 @@ async function requestChatCompletion(model, endpoints) {
         if (!retried429 && /HTTP\s+429/i.test(message)) {
           retried429 = true;
           await sleep(750);
+          continue;
+        }
+        // Retry once on transient network/abort errors which surface during long generations
+        if (!retriedNetwork && /(NetworkError|Failed to fetch|AbortError|aborted|network error|The user aborted a request)/i.test(message)) {
+          retriedNetwork = true;
+          await sleep(700);
           continue;
         }
         break;
