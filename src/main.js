@@ -1027,6 +1027,8 @@ function tryStartPlayback(job) {
   audio.preload = 'auto';
   audio.currentTime = 0;
   try { audio.load(); } catch {}
+  try { audio.playsInline = true; } catch {}
+  try { audio.crossOrigin = 'anonymous'; } catch {}
   job.audio = audio;
   let started = false;
   let watchdog = null;
@@ -1037,9 +1039,12 @@ function tryStartPlayback(job) {
     audio.play().catch(() => {});
   };
   audio.addEventListener('loadedmetadata', startPlay, { once: true });
+  audio.addEventListener('loadeddata', startPlay, { once: true });
   audio.addEventListener('canplay', startPlay, { once: true });
   audio.addEventListener('canplaythrough', startPlay, { once: true });
   watchdog = setTimeout(startPlay, 1500);
+  // Also try an immediate kick-off in case events are delayed
+  setTimeout(startPlay, 0);
 
   audio.addEventListener('playing', () => {
     if (job.cancelled) return;
@@ -1049,6 +1054,17 @@ function tryStartPlayback(job) {
       clearWatchdog();
     }
   });
+  // Some browsers may not fire 'playing' reliably; detect progress via timeupdate
+  const onTimeUpdate = () => {
+    if (job.cancelled) return;
+    if (!started && audio.currentTime > 0) {
+      started = true;
+      setTtsChunkState(job, index, 'speaking');
+      clearWatchdog();
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+    }
+  };
+  audio.addEventListener('timeupdate', onTimeUpdate);
 
   audio.addEventListener('stalled', () => {
     if (job.cancelled) return;
