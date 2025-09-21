@@ -405,6 +405,29 @@ function safeJsonParse(text) {
   } catch { return null; }
 }
 
+// Attempt to parse slightly malformed JSON often produced by models.
+// - Strips code fences and language tags if present
+// - Removes line and block comments
+// - Replaces smart quotes with standard quotes
+// - Removes trailing commas before } or ]
+function looseJsonParse(text) {
+  if (text == null) return null;
+  let s = String(text).trim();
+  // Remove surrounding code fences if any
+  if (/^```/.test(s)) {
+    s = s.replace(/^```[a-zA-Z0-9_-]*\s*\r?\n/, '');
+    s = s.replace(/\r?\n?```\s*$/, '');
+  }
+  // Normalize quotes
+  s = s.replace(/[“”]/g, '"').replace(/[‘’]/g, '"');
+  // Remove comments (best-effort)
+  s = s.replace(/\/\*[\s\S]*?\*\//g, ''); // block comments
+  s = s.replace(/^\s*\/\/.*$/gm, ''); // line comments
+  // Remove trailing commas
+  s = s.replace(/,\s*([}\]])/g, '$1');
+  try { return JSON.parse(s); } catch { return null; }
+}
+
 async function renderFromJsonPayload(payload) {
   try {
     if (payload == null || typeof payload !== 'object') return;
@@ -481,7 +504,8 @@ function extractPolliImagesFromText(text) {
     if (t.type === 'code' && accepted.has(t.lang)) {
       const raw = t.content.trim();
       try {
-        const obj = JSON.parse(raw);
+        let obj = null;
+        try { obj = JSON.parse(raw); } catch { obj = looseJsonParse(raw); }
         // Accept multiple shapes: {images:[...]}, {prompt:...}, {image:{prompt:...}}
         if (obj && typeof obj === 'object') {
           if (Array.isArray(obj.images) && obj.images.length) {
@@ -501,6 +525,40 @@ function extractPolliImagesFromText(text) {
         }
       } catch (e) {
         console.warn('Invalid JSON payload in code fence (ignored):', e);
+        // If looks like a JSON-ish image payload, attempt lenient parse
+        if (/"images"\s*:\s*\[/.test(raw) || /\bprompt\b/.test(raw)) {
+          const obj = looseJsonParse(raw);
+          if (obj && typeof obj === 'object') {
+            if (Array.isArray(obj.images) && obj.images.length) {
+              for (const im of obj.images) {
+                if (im && typeof im.prompt === 'string' && im.prompt.trim()) directives.push(im);
+              }
+              continue;
+            }
+            if (obj.image && typeof obj.image === 'object' && typeof obj.image.prompt === 'string') {
+              directives.push({ ...obj.image });
+              continue;
+            }
+            if (typeof obj.prompt === 'string' && obj.prompt.trim().length) {
+              directives.push(obj);
+              continue;
+            }
+          }
+        }
+      }
+    }
+    // Also attempt to catch bare code fences without a language containing an images payload
+    if (t.type === 'code' && !t.lang) {
+      const raw = t.content.trim();
+      if (/"images"\s*:\s*\[/.test(raw)) {
+        const obj = looseJsonParse(raw);
+        if (obj && typeof obj === 'object' && Array.isArray(obj.images) && obj.images.length) {
+          for (const im of obj.images) {
+            if (im && typeof im.prompt === 'string' && im.prompt.trim()) directives.push(im);
+          }
+          // omit this code block from output if it looked like an image directive
+          continue;
+        }
       }
     }
     kept.push(t);
@@ -515,6 +573,42 @@ function extractPolliImagesFromText(text) {
     })
     .join('');
   return { cleaned, directives };
+}
+
+// Fallback: extract JSON objects with an images[] field from arbitrary text (not fenced)
+function extractImagePayloadsFromAnyText(text) {
+  const s = String(text || '');
+  const results = [];
+  for (let i = 0; i < s.length; i += 1) {
+    if (s[i] !== '{') continue;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let j = i; j < s.length; j += 1) {
+      const ch = s[j];
+      if (inStr) {
+        if (esc) { esc = false; }
+        else if (ch === '\\') { esc = true; }
+        else if (ch === '"') { inStr = false; }
+      } else {
+        if (ch === '"') inStr = true;
+        else if (ch === '{') depth += 1;
+        else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            const chunk = s.slice(i, j + 1);
+            if (/"images"\s*:\s*\[/.test(chunk)) {
+              const obj = looseJsonParse(chunk) || safeJsonParse(chunk);
+              if (obj && typeof obj === 'object') results.push(obj);
+            }
+            i = j; // advance outer loop
+            break;
+          }
+        }
+      }
+    }
+  }
+  return results;
 }
 
 function disableApplicationControls() {
@@ -802,6 +896,9 @@ async function handleChatResponse(initialResponse, model, endpoint) {
 
     const textContent = normalizeContent(message.content);
     if (textContent) {
+      // Track images before/after to know if we need a deeper fallback
+      const imagesBefore = state.messages.filter(m => m?.type === 'image').length;
+
       const json = safeJsonParse(textContent);
       const looksRenderableJson = json && typeof json === 'object' && (
         (typeof json.text === 'string' && json.text.trim().length) ||
@@ -845,6 +942,19 @@ async function handleChatResponse(initialResponse, model, endpoint) {
             } catch (err) {
               console.warn('Failed to render polli-image block:', err);
               addMessage({ role: 'assistant', type: 'error', content: String(err?.message ?? err) });
+            }
+          }
+        }
+
+        // If no images were produced yet, look for bare JSON objects in text
+        const imagesAfter = state.messages.filter(m => m?.type === 'image').length;
+        if (imagesAfter === imagesBefore) {
+          const payloads = extractImagePayloadsFromAnyText(textContent);
+          for (const obj of payloads) {
+            try {
+              await renderFromJsonPayload(obj);
+            } catch (err) {
+              console.warn('Failed to render image from loose JSON payload:', err);
             }
           }
         }
