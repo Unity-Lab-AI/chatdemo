@@ -844,25 +844,42 @@ async function fetchTtsAudioUrl(text, voice) {
   const ref = getReferrer();
   const base = 'https://text.pollinations.ai';
   const header = 'Speak only the following text, exactly as it is written:';
-  const combined = `${header}\n${text}`;
-  const u = new URL(base + '/' + encodeURIComponent(combined));
-  u.searchParams.set('model', 'openai-audio');
-  u.searchParams.set('voice', String(voice));
-  // Strong hints to avoid generative behavior and filtering
-  u.searchParams.set('temperature', '0');
-  u.searchParams.set('top_p', '0');
-  u.searchParams.set('presence_penalty', '0');
-  u.searchParams.set('frequency_penalty', '0');
-  u.searchParams.set('safe', 'false');
-  // Ask engine to read exactly without paraphrasing (ignored by pure TTS, helpful if model-backed)
-  u.searchParams.set('system', 'Speak exactly the provided text verbatim. Do not add, rephrase, or omit any words. Read only the content after the line break.');
-  if (ref) u.searchParams.set('referrer', ref);
-  const resp = await fetch(u.toString(), { method: 'GET' });
-  if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
-  const blob = await resp.blob();
-  const url = URL.createObjectURL(blob);
-  trackedAudioUrls.add(url);
-  return url;
+  const attempts = [
+    { withHeader: true, safeFalse: true, system: true },
+    { withHeader: true, safeFalse: false, system: true },
+    { withHeader: true, safeFalse: false, system: false },
+    { withHeader: false, safeFalse: false, system: false },
+  ];
+  for (const a of attempts) {
+    const combined = a.withHeader ? `${header}\n${text}` : text;
+    const u = new URL(base + '/' + encodeURIComponent(combined));
+    u.searchParams.set('model', 'openai-audio');
+    u.searchParams.set('voice', String(voice));
+    u.searchParams.set('temperature', '0');
+    u.searchParams.set('top_p', '0');
+    u.searchParams.set('presence_penalty', '0');
+    u.searchParams.set('frequency_penalty', '0');
+    if (a.safeFalse) u.searchParams.set('safe', 'false');
+    if (a.system) u.searchParams.set('system', 'Speak exactly the provided text verbatim. Do not add, rephrase, or omit any words. Read only the content after the line break.');
+    if (ref) u.searchParams.set('referrer', ref);
+    try {
+      const resp = await fetch(u.toString(), { method: 'GET' });
+      if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      // Basic sanity: require something that looks like audio
+      const ctype = resp.headers.get('Content-Type') || '';
+      if (ctype && !/audio\//i.test(ctype)) {
+        // Still try to play; some gateways do not set correct type
+      }
+      const url = URL.createObjectURL(blob);
+      trackedAudioUrls.add(url);
+      return url;
+    } catch (e) {
+      // Try next attempt
+      continue;
+    }
+  }
+  throw new Error('TTS fetch failed for all attempts');
 }
 
 function cancelCurrentTtsJob() {
@@ -891,44 +908,63 @@ function startVoicePlaybackForMessage(message, voice) {
     messageId: message.id,
     voice,
     groups,
-    idx: 0,
-    queue: [],
+    // Fetch coordination
+    nextFetchIndex: 0,
+    maxConcurrency: 2,
+    inflight: 0,
+    // Playback ordering
+    results: new Array(groups.length), // urls by index
+    playIndex: 0,
+    // Misc
     timers: [],
     audio: null,
     cancelled: false,
   };
   currentTtsJob = job;
 
-  // Producer: fetch all chunks without artificial delay; push to queue as they arrive
-  for (const chunk of job.groups) {
-    (async () => {
-      try {
-        const url = await fetchTtsAudioUrl(chunk, job.voice);
-        if (job.cancelled) return;
-        job.queue.push({ url, text: chunk });
-        tryStartPlayback(job);
-      } catch (e) {
-        if (!job.cancelled) console.warn('TTS fetch failed', e);
-      }
-    })();
-  }
+  const launchFetches = () => {
+    if (job.cancelled) return;
+    while (job.inflight < job.maxConcurrency && job.nextFetchIndex < job.groups.length) {
+      const index = job.nextFetchIndex++;
+      job.inflight += 1;
+      (async () => {
+        try {
+          const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
+          if (!job.cancelled) {
+            job.results[index] = url;
+            tryStartPlayback(job);
+          }
+        } catch (e) {
+          if (!job.cancelled) console.warn('TTS fetch failed', e);
+          job.results[index] = null;
+        } finally {
+          job.inflight -= 1;
+          launchFetches();
+        }
+      })();
+    }
+  };
+  launchFetches();
 }
 
 function tryStartPlayback(job) {
   if (job.cancelled) return;
   // If already playing, nothing to do; the 'ended' handler will pick next
   if (job.audio && !job.audio.ended && !job.audio.paused) return;
-  const next = job.queue.shift();
-  if (!next) return;
-  const audio = new Audio(next.url);
+  const index = job.playIndex;
+  const url = job.results[index];
+  if (!url) return; // not ready yet
+  const audio = new Audio(url);
   job.audio = audio;
   audio.addEventListener('ended', () => {
     if (job.cancelled) return;
+    job.playIndex += 1;
     tryStartPlayback(job);
   });
   audio.addEventListener('error', () => {
     if (job.cancelled) return;
-    setTimeout(() => tryStartPlayback(job), 200);
+    job.playIndex += 1; // skip broken chunk
+    tryStartPlayback(job);
   });
   void audio.play();
 }
