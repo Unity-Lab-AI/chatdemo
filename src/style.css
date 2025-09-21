@@ -249,6 +249,28 @@ textarea:focus {
   margin: 0.75rem 0;
 }
 
+/* TTS status debugger */
+.tts-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  border-left: 3px solid #e5e7eb;
+  padding-left: 8px;
+}
+.tts-status .tts-chunk {
+  display: inline-block;
+  padding: 4px 6px;
+  border-radius: 6px;
+  line-height: 1.35;
+}
+.tts-status .tts-chunk.pending { background: #fee2e2; }
+.tts-status .tts-chunk.sent { background: #e0f2fe; }
+.tts-status .tts-chunk.received { background: #fef3c7; }
+.tts-status .tts-chunk.speaking { background: #dcfce7; }
+.tts-status .tts-chunk.done { background: #f1f5f9; }
+.tts-status .tts-chunk.error { background: #fde68a; }
+
 .md .code-block pre {
   margin: 0;
   border-radius: 12px;

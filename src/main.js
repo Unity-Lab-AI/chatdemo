@@ -656,6 +656,7 @@ function renderMessages() {
   for (const message of state.messages) {
     const article = document.createElement('article');
     article.className = `message ${message.role}${message.type === 'error' ? ' error' : ''}`;
+    try { article.dataset.messageId = String(message.id || ''); } catch {}
 
     if (message.type === 'image') {
       const wrapper = document.createElement('div');
@@ -696,6 +697,13 @@ function renderMessages() {
       }
     }
 
+    // Ensure a TTS status placeholder exists for assistant text messages
+    if (message.role === 'assistant' && message.type === 'text') {
+      const tts = document.createElement('div');
+      tts.className = 'tts-status';
+      try { tts.dataset.messageId = String(message.id || ''); } catch {}
+      article.appendChild(tts);
+    }
     fragment.appendChild(article);
   }
   container.appendChild(fragment);
@@ -955,24 +963,44 @@ function startVoicePlaybackForMessage(message, voice) {
     timers: [],
     audio: null,
     cancelled: false,
+    status: new Array(chunks.length).fill('pending'),
+    statusEl: null,
   };
   currentTtsJob = job;
+
+  // Attach or create a TTS status UI under this message
+  try {
+    const article = document.querySelector(`article.message.assistant[data-message-id="${String(message.id)}"]`);
+    if (article) {
+      let el = article.querySelector('.tts-status');
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'tts-status';
+        article.appendChild(el);
+      }
+      job.statusEl = el;
+      renderTtsStatus(job);
+    }
+  } catch {}
 
   const scheduleNextFetch = () => {
     if (job.cancelled) return;
     if (job.nextFetchIndex >= job.groups.length) return;
     const index = job.nextFetchIndex++;
     job.inflight += 1;
+    setTtsChunkState(job, index, 'sent');
     (async () => {
       try {
         const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
         if (!job.cancelled) {
           job.results[index] = url;
+          setTtsChunkState(job, index, 'received');
           tryStartPlayback(job);
         }
       } catch (e) {
         if (!job.cancelled) console.warn('TTS fetch failed', e);
         job.results[index] = null;
+        setTtsChunkState(job, index, 'error');
       } finally {
         job.inflight -= 1;
       }
@@ -993,18 +1021,78 @@ function tryStartPlayback(job) {
   const url = job.results[index];
   if (!url) return; // not ready yet
   const audio = new Audio(url);
+  audio.preload = 'auto';
+  audio.currentTime = 0;
   job.audio = audio;
+  let started = false;
+  let watchdog = null;
+  const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
+
+  const startPlay = () => {
+    if (job.cancelled) return;
+    audio.play().catch(() => {});
+  };
+  audio.addEventListener('canplay', startPlay, { once: true });
+  watchdog = setTimeout(startPlay, 800);
+
+  audio.addEventListener('playing', () => {
+    if (job.cancelled) return;
+    if (!started) {
+      started = true;
+      setTtsChunkState(job, index, 'speaking');
+      clearWatchdog();
+    }
+  });
+
+  audio.addEventListener('stalled', () => {
+    if (job.cancelled) return;
+    audio.play().catch(() => {});
+  });
+
+  const stallTimer = setTimeout(() => {
+    if (!started) {
+      setTtsChunkState(job, index, 'error');
+      job.playIndex += 1;
+      tryStartPlayback(job);
+    }
+  }, 2000);
+
   audio.addEventListener('ended', () => {
     if (job.cancelled) return;
+    clearTimeout(stallTimer);
+    clearWatchdog();
+    setTtsChunkState(job, index, 'done');
     job.playIndex += 1;
     tryStartPlayback(job);
   });
   audio.addEventListener('error', () => {
     if (job.cancelled) return;
+    setTtsChunkState(job, index, 'error');
     job.playIndex += 1; // skip broken chunk
     tryStartPlayback(job);
   });
-  void audio.play();
+}
+
+function renderTtsStatus(job) {
+  if (!job || !job.statusEl) return;
+  const el = job.statusEl;
+  el.innerHTML = '';
+  for (let i = 0; i < job.groups.length; i += 1) {
+    const span = document.createElement('span');
+    span.className = `tts-chunk ${job.status[i] || 'pending'}`;
+    span.textContent = job.groups[i];
+    el.appendChild(span);
+  }
+}
+
+function setTtsChunkState(job, index, state) {
+  if (!job) return;
+  job.status[index] = state;
+  if (!job.statusEl) return;
+  const nodes = job.statusEl.querySelectorAll('.tts-chunk');
+  const node = nodes[index];
+  if (!node) return;
+  node.className = `tts-chunk ${state}`;
 }
 
 function normalizeContent(content) {
