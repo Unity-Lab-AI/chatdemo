@@ -774,6 +774,7 @@ async function speakMessage(_message, _opts = {}) {
     if (!state.voicePlayback || !voice || !_message || typeof _message.content !== 'string') return;
     const text = String(_message.content || '').trim();
     if (!text) return;
+    if (currentTtsJob && currentTtsJob.messageId === _message.id) return; // avoid duplicate starts for same message
     startVoicePlaybackForMessage(_message, voice);
   } catch {}
 }
@@ -845,6 +846,14 @@ async function fetchTtsAudioUrl(text, voice) {
   const u = new URL(base + '/' + encodeURIComponent(text));
   u.searchParams.set('model', 'openai-audio');
   u.searchParams.set('voice', String(voice));
+  // Strong hints to avoid generative behavior and filtering
+  u.searchParams.set('temperature', '0');
+  u.searchParams.set('top_p', '0');
+  u.searchParams.set('presence_penalty', '0');
+  u.searchParams.set('frequency_penalty', '0');
+  u.searchParams.set('safe', 'false');
+  // Ask engine to read exactly without paraphrasing (ignored by pure TTS, helpful if model-backed)
+  u.searchParams.set('system', 'Speak exactly the provided text verbatim. Do not add, rephrase, or omit any words.');
   if (ref) u.searchParams.set('referrer', ref);
   const resp = await fetch(u.toString(), { method: 'GET' });
   if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
