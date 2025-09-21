@@ -94,6 +94,8 @@ const IMAGE_TOOL = {
 
 let client = null;
 
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
 const app = document.querySelector('#app');
 const DEBUG = (() => {
   try {
@@ -905,20 +907,43 @@ async function generateImageAsset(prompt, { width, height, model: imageModel, se
       throw new Error('Pollinations client is not ready.');
     }
     const resolvedSeed = (typeof seed === 'number' || (typeof seed === 'string' && seed.trim().length)) ? seed : generateSeed();
-    const binary = await image(
-      prompt,
-      {
-        width,
-        height,
-        model: imageModel,
-        nologo: true,
-        seed: resolvedSeed,
-      },
-      client,
-    );
-    const dataUrl = binary.toDataUrl();
-    resetStatusIfIdle();
-    return { dataUrl, seed: resolvedSeed };
+    const dims = [];
+    const w = Number(width) || 1024;
+    const h = Number(height) || 1024;
+    dims.push([w, h]);
+    if (w > 512 || h > 512) dims.push([512, 512]);
+
+    const fallbackModels = ['flux', 'turbo', 'kontext'];
+    const tried = new Set();
+
+    let lastError = null;
+    for (const [dw, dh] of dims) {
+      const modelSequence = [];
+      if (imageModel) modelSequence.push(String(imageModel));
+      for (const m of fallbackModels) if (!modelSequence.includes(m)) modelSequence.push(m);
+      for (const modelName of modelSequence) {
+        const key = `${modelName}:${dw}x${dh}`;
+        if (tried.has(key)) continue;
+        tried.add(key);
+        try {
+          const binary = await image(
+            prompt,
+            { width: dw, height: dh, model: modelName, nologo: true, seed: resolvedSeed },
+            client,
+          );
+          const dataUrl = binary.toDataUrl();
+          resetStatusIfIdle();
+          return { dataUrl, seed: resolvedSeed };
+        } catch (error) {
+          lastError = error;
+          const msg = String(error?.message || error);
+          if (/HTTP\s+429/i.test(msg)) {
+            await sleep(750);
+          }
+        }
+      }
+    }
+    throw lastError || new Error('Image generation failed');
   } catch (error) {
     console.error('Image generation failed', error);
     throw error;
@@ -1122,37 +1147,48 @@ async function requestChatCompletion(model, endpoints) {
 
   const attemptErrors = [];
   for (const endpoint of endpoints) {
-    try {
-      const response = await chat(
-        {
-          model: model.id,
-          endpoint,
-          messages: state.conversation,
-          ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
-        },
-        client,
-      );
-      if (!response?.model) {
-        return { response, endpoint };
-      }
-      if (isMatchingModelName(response.model, model)) {
-        return { response, endpoint };
-      }
-      if (doesResponseMatchModel(response, model)) {
-        console.warn(
-          'Model mismatch detected. Expected %s, received %s. Proceeding based on alias metadata.',
-          model.id,
-          response.model,
+    let retried429 = false;
+    for (;;) {
+      try {
+        const response = await chat(
+          {
+            model: model.id,
+            endpoint,
+            messages: state.conversation,
+            ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
+          },
+          client,
         );
-        return { response, endpoint };
+        if (!response?.model) {
+          return { response, endpoint };
+        }
+        if (isMatchingModelName(response.model, model)) {
+          return { response, endpoint };
+        }
+        if (doesResponseMatchModel(response, model)) {
+          console.warn(
+            'Model mismatch detected. Expected %s, received %s. Proceeding based on alias metadata.',
+            model.id,
+            response.model,
+          );
+          return { response, endpoint };
+        }
+        attemptErrors.push(
+          new Error(
+            `Endpoint "${endpoint}" responded with "${response?.model ?? 'unknown'}" instead of "${model.id}".`,
+          ),
+        );
+        break;
+      } catch (error) {
+        const message = error?.message ?? String(error);
+        attemptErrors.push(error instanceof Error ? error : new Error(String(error)));
+        if (!retried429 && /HTTP\s+429/i.test(message)) {
+          retried429 = true;
+          await sleep(750);
+          continue;
+        }
+        break;
       }
-      attemptErrors.push(
-        new Error(
-          `Endpoint "${endpoint}" responded with "${response?.model ?? 'unknown'}" instead of "${model.id}".`,
-        ),
-      );
-    } catch (error) {
-      attemptErrors.push(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
