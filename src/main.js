@@ -628,7 +628,7 @@ function disableApplicationControls() {
     els.voicePlayback.checked = false;
   }
   state.voicePlayback = false;
-  cancelCurrentTtsJob();
+  cancelAllTtsJobs({ clearHistory: true });
   els.form.classList.remove('loading');
 }
 
@@ -647,7 +647,7 @@ function resetConversation({ clearMessages = false } = {}) {
     messageIdCounter = 0;
     renderMessages();
   }
-  cancelCurrentTtsJob();
+  cancelAllTtsJobs({ clearHistory: true });
 }
 
 function renderMessages() {
@@ -708,6 +708,7 @@ function renderMessages() {
     fragment.appendChild(article);
   }
   container.appendChild(fragment);
+  syncAllTtsStatusEls();
   container.scrollTop = container.scrollHeight;
 }
 
@@ -783,7 +784,7 @@ async function speakMessage(_message, _opts = {}) {
     if (!state.voicePlayback || !voice || !_message || typeof _message.content !== 'string') return;
     const text = String(_message.content || '').trim();
     if (!text) return;
-    if (currentTtsJob && currentTtsJob.messageId === _message.id) return; // avoid duplicate starts for same message
+    if (isMessageInTtsPipeline(_message?.id)) return; // avoid duplicate starts for same message
     startVoicePlaybackForMessage(_message, voice);
   } catch {}
 }
@@ -801,6 +802,8 @@ async function playMessageAudio(message) {
 
 // -------------------- Voice playback (TTS) --------------------
 let currentTtsJob = null;
+const ttsQueue = [];
+const ttsJobsByMessage = new Map();
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRhYAAABXQVZFZm10IBIAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
 const TTS_CHUNK_MAX_CHARS = 250;
 const TTS_CHUNK_ERROR = Symbol('tts-chunk-error');
@@ -1040,65 +1043,113 @@ async function fetchTtsAudioUrl(text, voice) {
   throw new Error('TTS fetch failed for all attempts');
 }
 
-function cancelCurrentTtsJob() {
-  try {
-    if (!currentTtsJob) return;
-    currentTtsJob.cancelled = true;
-    for (const t of currentTtsJob.timers) clearTimeout(t);
-    currentTtsJob.timers.length = 0;
-    if (currentTtsJob.audio) {
-      try { currentTtsJob.audio.pause(); } catch {}
-      currentTtsJob.audio = null;
-    }
-    currentTtsJob.activeIndex = null;
-    currentTtsJob = null;
-  } catch {}
+function isMessageInTtsPipeline(messageId) {
+  if (messageId == null) return false;
+  if (currentTtsJob && !currentTtsJob.cancelled && currentTtsJob.messageId === messageId) return true;
+  return ttsQueue.some(job => !job.cancelled && job.messageId === messageId);
 }
 
-function startVoicePlaybackForMessage(message, voice) {
-  cancelCurrentTtsJob();
-  const raw = stripNonSpokenParts(message.content || '');
-  if (!raw) return;
-  const chunks = buildTtsChunks(raw, { maxChars: TTS_CHUNK_MAX_CHARS });
-  if (!chunks.length) return;
+function ensureTtsStatusElement(job) {
+  if (!job) return null;
+  if (job.statusEl && job.statusEl.isConnected) return job.statusEl;
+  try {
+    const article = document.querySelector(`article.message.assistant[data-message-id="${String(job.messageId)}"]`);
+    if (!article) return null;
+    let el = article.querySelector('.tts-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'tts-status';
+      article.appendChild(el);
+    }
+    job.statusEl = el;
+    return el;
+  } catch {
+    return null;
+  }
+}
 
-  const job = {
+function cancelTtsJob(job, { resetPending = false } = {}) {
+  if (!job) return;
+  job.cancelled = true;
+  for (const t of job.timers) clearTimeout(t);
+  job.timers.length = 0;
+  if (job.audio) {
+    try { job.audio.pause(); } catch {}
+  }
+  job.audio = null;
+  job.activeIndex = null;
+  job.inflight = 0;
+  if (resetPending && Array.isArray(job.status)) {
+    for (let i = 0; i < job.status.length; i += 1) {
+      if (job.status[i] !== 'done' && job.status[i] !== 'error') {
+        job.status[i] = 'pending';
+      }
+    }
+    renderTtsStatus(job);
+  }
+}
+
+function cancelAllTtsJobs({ clearHistory = false } = {}) {
+  if (currentTtsJob) {
+    cancelTtsJob(currentTtsJob, { resetPending: true });
+    currentTtsJob = null;
+  }
+  while (ttsQueue.length) {
+    const job = ttsQueue.shift();
+    cancelTtsJob(job, { resetPending: true });
+  }
+  if (clearHistory) {
+    ttsJobsByMessage.clear();
+  }
+}
+
+function createTtsJob(message, voice) {
+  const raw = stripNonSpokenParts(message?.content || '');
+  if (!raw) return null;
+  const chunks = buildTtsChunks(raw, { maxChars: TTS_CHUNK_MAX_CHARS });
+  if (!chunks.length) return null;
+
+  return {
     messageId: message.id,
     voice,
     groups: chunks,
-    // Fetch coordination (paced at ~3s per chunk)
     nextFetchIndex: 0,
     inflight: 0,
-    // Playback ordering
-    results: new Array(chunks.length), // urls by index
+    results: new Array(chunks.length),
     playIndex: 0,
     activeIndex: null,
-    // Misc
     timers: [],
     audio: null,
     cancelled: false,
+    completed: false,
     status: new Array(chunks.length).fill('pending'),
     statusEl: null,
+    started: false,
   };
-  currentTtsJob = job;
+}
 
-  // Attach or create a TTS status UI under this message
-  try {
-    const article = document.querySelector(`article.message.assistant[data-message-id="${String(message.id)}"]`);
-    if (article) {
-      let el = article.querySelector('.tts-status');
-      if (!el) {
-        el = document.createElement('div');
-        el.className = 'tts-status';
-        article.appendChild(el);
-      }
-      job.statusEl = el;
-      renderTtsStatus(job);
+function activateNextTtsJob() {
+  if (currentTtsJob) return;
+  while (ttsQueue.length) {
+    const nextJob = ttsQueue.shift();
+    if (!nextJob || nextJob.cancelled) {
+      continue;
     }
-  } catch {}
+    currentTtsJob = nextJob;
+    beginTtsJob(nextJob);
+    break;
+  }
+}
+
+function beginTtsJob(job) {
+  if (!job || job.started || job.cancelled) return;
+  job.started = true;
+  job.completed = false;
+  ensureTtsStatusElement(job);
+  renderTtsStatus(job);
 
   const scheduleNextFetch = () => {
-    if (job.cancelled) return;
+    if (job.cancelled || job.completed || currentTtsJob !== job) return;
     if (job.nextFetchIndex >= job.groups.length) return;
     if (job.inflight >= 2) {
       const wait = setTimeout(scheduleNextFetch, 250);
@@ -1107,19 +1158,19 @@ function startVoicePlaybackForMessage(message, voice) {
     }
     const index = job.nextFetchIndex++;
     const fetchChunk = (attempt = 0) => {
-      if (job.cancelled) return;
+      if (job.cancelled || job.completed || currentTtsJob !== job) return;
       job.inflight += 1;
       setTtsChunkState(job, index, 'sent');
       (async () => {
         try {
           const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
-          if (!job.cancelled) {
+          if (!job.cancelled && !job.completed && currentTtsJob === job) {
             job.results[index] = url;
             setTtsChunkState(job, index, 'received');
             tryStartPlayback(job);
           }
         } catch (e) {
-          if (!job.cancelled) {
+          if (!job.cancelled && !job.completed && currentTtsJob === job) {
             console.warn('TTS fetch failed', e);
             const maxRetries = 3;
             if (attempt + 1 < maxRetries) {
@@ -1133,7 +1184,7 @@ function startVoicePlaybackForMessage(message, voice) {
             }
           }
         } finally {
-          job.inflight -= 1;
+          job.inflight = Math.max(0, job.inflight - 1);
         }
       })();
     };
@@ -1146,8 +1197,37 @@ function startVoicePlaybackForMessage(message, voice) {
   scheduleNextFetch();
 }
 
+function completeTtsJob(job) {
+  if (!job || job.completed) return;
+  job.completed = true;
+  for (const t of job.timers) clearTimeout(t);
+  job.timers.length = 0;
+  if (job.audio) {
+    try { job.audio.pause(); } catch {}
+  }
+  job.audio = null;
+  job.activeIndex = null;
+  job.inflight = 0;
+  job.nextFetchIndex = job.groups.length;
+  if (currentTtsJob === job) {
+    currentTtsJob = null;
+  }
+  activateNextTtsJob();
+}
+
+function startVoicePlaybackForMessage(message, voice) {
+  const job = createTtsJob(message, voice);
+  if (!job) return;
+  ttsJobsByMessage.set(job.messageId, job);
+  ensureTtsStatusElement(job);
+  renderTtsStatus(job);
+  ttsQueue.push(job);
+  activateNextTtsJob();
+}
+
 function tryStartPlayback(job) {
-  if (job.cancelled) return;
+  if (!job || job.cancelled || job.completed) return;
+  if (currentTtsJob && currentTtsJob !== job) return;
   if (typeof job.activeIndex === 'number') {
     const activeStatus = job.status[job.activeIndex];
     if (activeStatus !== 'done' && activeStatus !== 'error') {
@@ -1194,7 +1274,7 @@ function tryStartPlayback(job) {
 
     let playbackPromise = null;
     const attemptPlayback = () => {
-      if (job.cancelled) return;
+      if (job.cancelled || job.completed || currentTtsJob !== job) return;
       if (playbackPromise) return;
       playbackPromise = playAudioWithUnlock(audio).finally(() => {
         playbackPromise = null;
@@ -1209,7 +1289,7 @@ function tryStartPlayback(job) {
     setTimeout(attemptPlayback, 0);
 
     audio.addEventListener('playing', () => {
-      if (job.cancelled) return;
+      if (job.cancelled || job.completed || currentTtsJob !== job) return;
       if (!started) {
         started = true;
         setTtsChunkState(job, index, 'speaking');
@@ -1218,7 +1298,7 @@ function tryStartPlayback(job) {
     });
     // Some browsers may not fire 'playing' reliably; detect progress via timeupdate
     const onTimeUpdate = () => {
-      if (job.cancelled) return;
+      if (job.cancelled || job.completed || currentTtsJob !== job) return;
       if (!started && audio.currentTime > 0) {
         started = true;
         setTtsChunkState(job, index, 'speaking');
@@ -1229,12 +1309,12 @@ function tryStartPlayback(job) {
     audio.addEventListener('timeupdate', onTimeUpdate);
 
     audio.addEventListener('stalled', () => {
-      if (job.cancelled) return;
+      if (job.cancelled || job.completed || currentTtsJob !== job) return;
       void playAudioWithUnlock(audio);
     });
 
     const stallTimer = setTimeout(() => {
-      if (!started) {
+      if (!started && !job.cancelled && !job.completed && currentTtsJob === job) {
         // Give slower decoders more time; mark as error only after generous grace
         setTtsChunkState(job, index, 'error');
         job.playIndex += 1;
@@ -1243,7 +1323,7 @@ function tryStartPlayback(job) {
     }, 7000);
 
     audio.addEventListener('ended', () => {
-      if (job.cancelled) return;
+      if (job.cancelled || job.completed || currentTtsJob !== job) return;
       clearTimeout(stallTimer);
       clearWatchdog();
       setTtsChunkState(job, index, 'done');
@@ -1253,7 +1333,7 @@ function tryStartPlayback(job) {
       tryStartPlayback(job);
     });
     audio.addEventListener('error', () => {
-      if (job.cancelled) return;
+      if (job.cancelled || job.completed || currentTtsJob !== job) return;
       setTtsChunkState(job, index, 'error');
       job.activeIndex = null;
       job.audio = null;
@@ -1263,6 +1343,7 @@ function tryStartPlayback(job) {
     return;
   }
   job.audio = null;
+  completeTtsJob(job);
 }
 
 function renderTtsStatus(job) {
@@ -1285,6 +1366,18 @@ function setTtsChunkState(job, index, state) {
   const node = nodes[index];
   if (!node) return;
   node.className = `tts-chunk ${state}`;
+}
+
+function syncAllTtsStatusEls() {
+  try {
+    for (const job of ttsJobsByMessage.values()) {
+      if (!job) continue;
+      const el = ensureTtsStatusElement(job);
+      if (el) {
+        renderTtsStatus(job);
+      }
+    }
+  } catch {}
 }
 
 function normalizeContent(content) {
@@ -2166,7 +2259,7 @@ els.voiceButton.addEventListener('click', () => {
 els.voicePlayback.addEventListener('change', () => {
   if (!els.voicePlayback.checked) {
     state.voicePlayback = false;
-    cancelCurrentTtsJob();
+    cancelAllTtsJobs();
     setStatus('Voice playback muted.');
     playbackStatusTimer = window.setTimeout(() => {
       resetStatusIfIdle();
