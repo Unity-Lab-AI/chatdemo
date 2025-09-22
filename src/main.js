@@ -802,6 +802,7 @@ async function playMessageAudio(message) {
 // -------------------- Voice playback (TTS) --------------------
 let currentTtsJob = null;
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRhYAAABXQVZFZm10IBIAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
+const TTS_CHUNK_ERROR = Symbol('tts-chunk-error');
 let audioUnlocked = false;
 let audioUnlockPromise = null;
 let lastAudioUnlockWarning = 0;
@@ -1096,25 +1097,44 @@ function startVoicePlaybackForMessage(message, voice) {
   const scheduleNextFetch = () => {
     if (job.cancelled) return;
     if (job.nextFetchIndex >= job.groups.length) return;
+    if (job.inflight >= 2) {
+      const wait = setTimeout(scheduleNextFetch, 250);
+      job.timers.push(wait);
+      return;
+    }
     const index = job.nextFetchIndex++;
-    job.inflight += 1;
-    setTtsChunkState(job, index, 'sent');
-    (async () => {
-      try {
-        const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
-        if (!job.cancelled) {
-          job.results[index] = url;
-          setTtsChunkState(job, index, 'received');
-          tryStartPlayback(job);
+    const fetchChunk = (attempt = 0) => {
+      if (job.cancelled) return;
+      job.inflight += 1;
+      setTtsChunkState(job, index, 'sent');
+      (async () => {
+        try {
+          const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
+          if (!job.cancelled) {
+            job.results[index] = url;
+            setTtsChunkState(job, index, 'received');
+            tryStartPlayback(job);
+          }
+        } catch (e) {
+          if (!job.cancelled) {
+            console.warn('TTS fetch failed', e);
+            const maxRetries = 3;
+            if (attempt + 1 < maxRetries) {
+              const delay = [750, 1500, 3000][Math.min(attempt, 2)];
+              const timer = setTimeout(() => fetchChunk(attempt + 1), delay);
+              job.timers.push(timer);
+            } else {
+              job.results[index] = TTS_CHUNK_ERROR;
+              setTtsChunkState(job, index, 'error');
+              tryStartPlayback(job);
+            }
+          }
+        } finally {
+          job.inflight -= 1;
         }
-      } catch (e) {
-        if (!job.cancelled) console.warn('TTS fetch failed', e);
-        job.results[index] = null;
-        setTtsChunkState(job, index, 'error');
-      } finally {
-        job.inflight -= 1;
-      }
-    })();
+      })();
+    };
+    fetchChunk(0);
     if (job.nextFetchIndex < job.groups.length) {
       const t = setTimeout(scheduleNextFetch, 3000);
       job.timers.push(t);
@@ -1127,84 +1147,97 @@ function tryStartPlayback(job) {
   if (job.cancelled) return;
   // If already playing, nothing to do; the 'ended' handler will pick next
   if (job.audio && !job.audio.ended && !job.audio.paused) return;
-  const index = job.playIndex;
-  const url = job.results[index];
-  if (!url) return; // not ready yet
-  const audio = new Audio(url);
-  audio.preload = 'auto';
-  audio.currentTime = 0;
-  try { audio.load(); } catch {}
-  try { audio.playsInline = true; } catch {}
-  try { audio.crossOrigin = 'anonymous'; } catch {}
-  job.audio = audio;
-  let started = false;
-  let watchdog = null;
-  const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
+  while (job.playIndex < job.groups.length) {
+    const index = job.playIndex;
+    const result = job.results[index];
+    if (typeof result === 'undefined') return; // not ready yet
+    if (result === TTS_CHUNK_ERROR) {
+      job.playIndex += 1;
+      continue;
+    }
+    const url = result;
+    if (!url) {
+      job.playIndex += 1;
+      continue;
+    }
+    const audio = new Audio(url);
+    audio.preload = 'auto';
+    audio.currentTime = 0;
+    try { audio.load(); } catch {}
+    try { audio.playsInline = true; } catch {}
+    try { audio.crossOrigin = 'anonymous'; } catch {}
+    job.audio = audio;
+    let started = false;
+    let watchdog = null;
+    const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
 
-  let playbackPromise = null;
-  const attemptPlayback = () => {
-    if (job.cancelled) return;
-    if (playbackPromise) return;
-    playbackPromise = playAudioWithUnlock(audio).finally(() => {
-      playbackPromise = null;
+    let playbackPromise = null;
+    const attemptPlayback = () => {
+      if (job.cancelled) return;
+      if (playbackPromise) return;
+      playbackPromise = playAudioWithUnlock(audio).finally(() => {
+        playbackPromise = null;
+      });
+    };
+    audio.addEventListener('loadedmetadata', attemptPlayback, { once: true });
+    audio.addEventListener('loadeddata', attemptPlayback, { once: true });
+    audio.addEventListener('canplay', attemptPlayback, { once: true });
+    audio.addEventListener('canplaythrough', attemptPlayback, { once: true });
+    watchdog = setTimeout(attemptPlayback, 1500);
+    // Also try an immediate kick-off in case events are delayed
+    setTimeout(attemptPlayback, 0);
+
+    audio.addEventListener('playing', () => {
+      if (job.cancelled) return;
+      if (!started) {
+        started = true;
+        setTtsChunkState(job, index, 'speaking');
+        clearWatchdog();
+      }
     });
-  };
-  audio.addEventListener('loadedmetadata', attemptPlayback, { once: true });
-  audio.addEventListener('loadeddata', attemptPlayback, { once: true });
-  audio.addEventListener('canplay', attemptPlayback, { once: true });
-  audio.addEventListener('canplaythrough', attemptPlayback, { once: true });
-  watchdog = setTimeout(attemptPlayback, 1500);
-  // Also try an immediate kick-off in case events are delayed
-  setTimeout(attemptPlayback, 0);
+    // Some browsers may not fire 'playing' reliably; detect progress via timeupdate
+    const onTimeUpdate = () => {
+      if (job.cancelled) return;
+      if (!started && audio.currentTime > 0) {
+        started = true;
+        setTtsChunkState(job, index, 'speaking');
+        clearWatchdog();
+        audio.removeEventListener('timeupdate', onTimeUpdate);
+      }
+    };
+    audio.addEventListener('timeupdate', onTimeUpdate);
 
-  audio.addEventListener('playing', () => {
-    if (job.cancelled) return;
-    if (!started) {
-      started = true;
-      setTtsChunkState(job, index, 'speaking');
+    audio.addEventListener('stalled', () => {
+      if (job.cancelled) return;
+      void playAudioWithUnlock(audio);
+    });
+
+    const stallTimer = setTimeout(() => {
+      if (!started) {
+        // Give slower decoders more time; mark as error only after generous grace
+        setTtsChunkState(job, index, 'error');
+        job.playIndex += 1;
+        tryStartPlayback(job);
+      }
+    }, 7000);
+
+    audio.addEventListener('ended', () => {
+      if (job.cancelled) return;
+      clearTimeout(stallTimer);
       clearWatchdog();
-    }
-  });
-  // Some browsers may not fire 'playing' reliably; detect progress via timeupdate
-  const onTimeUpdate = () => {
-    if (job.cancelled) return;
-    if (!started && audio.currentTime > 0) {
-      started = true;
-      setTtsChunkState(job, index, 'speaking');
-      clearWatchdog();
-      audio.removeEventListener('timeupdate', onTimeUpdate);
-    }
-  };
-  audio.addEventListener('timeupdate', onTimeUpdate);
-
-  audio.addEventListener('stalled', () => {
-    if (job.cancelled) return;
-    void playAudioWithUnlock(audio);
-  });
-
-  const stallTimer = setTimeout(() => {
-    if (!started) {
-      // Give slower decoders more time; mark as error only after generous grace
-      setTtsChunkState(job, index, 'error');
+      setTtsChunkState(job, index, 'done');
       job.playIndex += 1;
       tryStartPlayback(job);
-    }
-  }, 7000);
-
-  audio.addEventListener('ended', () => {
-    if (job.cancelled) return;
-    clearTimeout(stallTimer);
-    clearWatchdog();
-    setTtsChunkState(job, index, 'done');
-    job.playIndex += 1;
-    tryStartPlayback(job);
-  });
-  audio.addEventListener('error', () => {
-    if (job.cancelled) return;
-    setTtsChunkState(job, index, 'error');
-    job.playIndex += 1; // skip broken chunk
-    tryStartPlayback(job);
-  });
+    });
+    audio.addEventListener('error', () => {
+      if (job.cancelled) return;
+      setTtsChunkState(job, index, 'error');
+      job.playIndex += 1; // skip broken chunk
+      tryStartPlayback(job);
+    });
+    return;
+  }
+  job.audio = null;
 }
 
 function renderTtsStatus(job) {
