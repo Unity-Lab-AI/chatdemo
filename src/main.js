@@ -802,6 +802,7 @@ async function playMessageAudio(message) {
 // -------------------- Voice playback (TTS) --------------------
 let currentTtsJob = null;
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRhYAAABXQVZFZm10IBIAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
+const TTS_CHUNK_MAX_CHARS = 250;
 const TTS_CHUNK_ERROR = Symbol('tts-chunk-error');
 let audioUnlocked = false;
 let audioUnlockPromise = null;
@@ -958,9 +959,9 @@ function groupSentences(sentences, groupSize = 2) {
 }
 
 // Build TTS chunks by character length, prefer ending at sentence boundaries.
-// - maxChars: hard cap per chunk (default 500)
+// - maxChars: hard cap per chunk (default 250)
 // - If a single sentence exceeds max, split it on whitespace near the limit.
-function buildTtsChunks(text, { maxChars = 500 } = {}) {
+function buildTtsChunks(text, { maxChars = TTS_CHUNK_MAX_CHARS } = {}) {
   const sents = splitIntoSentences(text);
   const chunks = [];
   let i = 0;
@@ -1049,6 +1050,7 @@ function cancelCurrentTtsJob() {
       try { currentTtsJob.audio.pause(); } catch {}
       currentTtsJob.audio = null;
     }
+    currentTtsJob.activeIndex = null;
     currentTtsJob = null;
   } catch {}
 }
@@ -1057,7 +1059,7 @@ function startVoicePlaybackForMessage(message, voice) {
   cancelCurrentTtsJob();
   const raw = stripNonSpokenParts(message.content || '');
   if (!raw) return;
-  const chunks = buildTtsChunks(raw, { maxChars: 500 });
+  const chunks = buildTtsChunks(raw, { maxChars: TTS_CHUNK_MAX_CHARS });
   if (!chunks.length) return;
 
   const job = {
@@ -1070,6 +1072,7 @@ function startVoicePlaybackForMessage(message, voice) {
     // Playback ordering
     results: new Array(chunks.length), // urls by index
     playIndex: 0,
+    activeIndex: null,
     // Misc
     timers: [],
     audio: null,
@@ -1145,6 +1148,23 @@ function startVoicePlaybackForMessage(message, voice) {
 
 function tryStartPlayback(job) {
   if (job.cancelled) return;
+  if (typeof job.activeIndex === 'number') {
+    const activeStatus = job.status[job.activeIndex];
+    if (activeStatus !== 'done' && activeStatus !== 'error') {
+      const activeAudio = job.audio;
+      if (activeAudio && !activeAudio.ended) {
+        if (activeAudio.paused) {
+          void playAudioWithUnlock(activeAudio);
+        }
+        return;
+      }
+      if (!activeAudio) {
+        return;
+      }
+    } else {
+      job.activeIndex = null;
+    }
+  }
   // If already playing, nothing to do; the 'ended' handler will pick next
   if (job.audio && !job.audio.ended && !job.audio.paused) return;
   while (job.playIndex < job.groups.length) {
@@ -1167,6 +1187,7 @@ function tryStartPlayback(job) {
     try { audio.playsInline = true; } catch {}
     try { audio.crossOrigin = 'anonymous'; } catch {}
     job.audio = audio;
+    job.activeIndex = index;
     let started = false;
     let watchdog = null;
     const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
@@ -1226,12 +1247,16 @@ function tryStartPlayback(job) {
       clearTimeout(stallTimer);
       clearWatchdog();
       setTtsChunkState(job, index, 'done');
+      job.activeIndex = null;
+      job.audio = null;
       job.playIndex += 1;
       tryStartPlayback(job);
     });
     audio.addEventListener('error', () => {
       if (job.cancelled) return;
       setTtsChunkState(job, index, 'error');
+      job.activeIndex = null;
+      job.audio = null;
       job.playIndex += 1; // skip broken chunk
       tryStartPlayback(job);
     });
