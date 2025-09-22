@@ -1111,6 +1111,9 @@ function startVoicePlaybackForMessage(message, voice) {
         if (!job.cancelled) console.warn('TTS fetch failed', e);
         job.results[index] = null;
         setTtsChunkState(job, index, 'error');
+        if (!job.cancelled && index === job.playIndex) {
+          tryStartPlayback(job);
+        }
       } finally {
         job.inflight -= 1;
       }
@@ -1127,9 +1130,20 @@ function tryStartPlayback(job) {
   if (job.cancelled) return;
   // If already playing, nothing to do; the 'ended' handler will pick next
   if (job.audio && !job.audio.ended && !job.audio.paused) return;
+  while (job.playIndex < job.results.length) {
+    const status = job.status?.[job.playIndex];
+    const url = job.results[job.playIndex];
+    if (url) break;
+    if (url === null || status === 'error') {
+      job.playIndex += 1;
+      continue;
+    }
+    return; // waiting on fetch to finish
+  }
+  if (job.playIndex >= job.results.length) return;
   const index = job.playIndex;
   const url = job.results[index];
-  if (!url) return; // not ready yet
+  if (!url) return;
   const audio = new Audio(url);
   audio.preload = 'auto';
   audio.currentTime = 0;
@@ -1186,6 +1200,10 @@ function tryStartPlayback(job) {
     if (!started) {
       // Give slower decoders more time; mark as error only after generous grace
       setTtsChunkState(job, index, 'error');
+      clearWatchdog();
+      try { audio.pause(); } catch {}
+      job.audio = null;
+      audio.removeEventListener('timeupdate', onTimeUpdate);
       job.playIndex += 1;
       tryStartPlayback(job);
     }
@@ -1196,12 +1214,18 @@ function tryStartPlayback(job) {
     clearTimeout(stallTimer);
     clearWatchdog();
     setTtsChunkState(job, index, 'done');
+    job.audio = null;
+    audio.removeEventListener('timeupdate', onTimeUpdate);
     job.playIndex += 1;
     tryStartPlayback(job);
   });
   audio.addEventListener('error', () => {
     if (job.cancelled) return;
     setTtsChunkState(job, index, 'error');
+    clearTimeout(stallTimer);
+    clearWatchdog();
+    job.audio = null;
+    audio.removeEventListener('timeupdate', onTimeUpdate);
     job.playIndex += 1; // skip broken chunk
     tryStartPlayback(job);
   });
