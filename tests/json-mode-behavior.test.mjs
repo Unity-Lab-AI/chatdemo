@@ -30,13 +30,27 @@ export async function run() {
         got = 'json';
       }
     } catch (e) {
-      // ignore, will retry without JSON
+      const msg = String(e?.message || '').toLowerCase();
+      if (msg.includes('fetch failed')) {
+        console.warn(`[json-mode-behavior] Skipping: network unavailable for ${m} (json mode).`);
+        return;
+      }
+      // ignore other errors; will retry without JSON
     }
 
     if (!got) {
-      const resp = await tryChat(m);
-      assert.ok(Array.isArray(resp?.choices), `choices missing for ${m} (fallback)`);
-      got = 'text';
+      try {
+        const resp = await tryChat(m);
+        assert.ok(Array.isArray(resp?.choices), `choices missing for ${m} (fallback)`);
+        got = 'text';
+      } catch (e) {
+        const msg = String(e?.message || '').toLowerCase();
+        if (msg.includes('fetch failed')) {
+          console.warn(`[json-mode-behavior] Skipping: network unavailable for ${m} (fallback).`);
+          return;
+        }
+        throw e;
+      }
     }
   }
 }

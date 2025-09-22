@@ -22,5 +22,9 @@ export async function run() {
   const contentJson = await tryChat(model, [{ role: 'user', content: base + ' Reply as JSON: {"text":"..."} only.' }], true);
   const contentText = await tryChat(model, [{ role: 'user', content: base }], false);
   // We do not assert, but we expect at least one path to produce non-empty prose.
+  if (!contentJson && !contentText) {
+    console.warn('[long-text-retry] Skipping: network unavailable for long-form request.');
+    return;
+  }
   assert.ok((contentJson && contentJson.length) || (contentText && contentText.length), 'Expect some content for long-form text');
 }

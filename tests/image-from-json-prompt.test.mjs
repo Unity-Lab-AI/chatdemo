@@ -9,7 +9,17 @@ export async function run() {
     { role: 'user', content: 'Respond strictly as JSON with this shape: {"text":"string","images":[{"prompt":"A simple blue square","width":256,"height":256,"model":"flux"}]}' },
   ];
   // Prefer a permissive model
-  const resp = await chat({ endpoint: 'openai', model: 'openai', messages, response_format: { type: 'json_object' } }, client);
+  let resp;
+  try {
+    resp = await chat({ endpoint: 'openai', model: 'openai', messages, response_format: { type: 'json_object' } }, client);
+  } catch (error) {
+    const msg = String(error?.message || '').toLowerCase();
+    if (msg.includes('fetch failed')) {
+      console.warn('[image-from-json] Skipping: network unavailable for chat request.');
+      return;
+    }
+    throw error;
+  }
   assert.ok(Array.isArray(resp?.choices), 'choices missing');
   const content = resp.choices[0]?.message?.content ?? '';
   let obj = null;
@@ -20,7 +30,17 @@ export async function run() {
   }
   const imgReq = obj.images[0];
   assert.ok(typeof imgReq.prompt === 'string' && imgReq.prompt.length > 0, 'missing prompt');
-  const bin = await image(imgReq.prompt, { width: imgReq.width || 256, height: imgReq.height || 256, model: imgReq.model || 'flux', nologo: true, seed: 12345678 }, client);
+  let bin;
+  try {
+    bin = await image(imgReq.prompt, { width: imgReq.width || 256, height: imgReq.height || 256, model: imgReq.model || 'flux', nologo: true, seed: 12345678 }, client);
+  } catch (error) {
+    const msg = String(error?.message || '').toLowerCase();
+    if (msg.includes('fetch failed')) {
+      console.warn('[image-from-json] Skipping: network unavailable for image request.');
+      return;
+    }
+    throw error;
+  }
   const dataUrl = bin?.toDataUrl?.();
   assert.ok(typeof dataUrl === 'string' && dataUrl.startsWith('data:image/'), 'invalid data url');
 }
