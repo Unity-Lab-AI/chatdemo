@@ -126,6 +126,31 @@ function resolveReferrer() {
   return DEFAULT_REFERRER;
 }
 
+function shouldRetryWithoutJson(error) {
+  if (!error) return false;
+  const status = typeof error.status === 'number' ? error.status : null;
+  if (status === 429) return false;
+  if (status && Number.isFinite(status)) {
+    if (status >= 500) return true;
+    if ([400, 408, 409, 413, 415, 422].includes(status)) return true;
+  }
+  const message = String(error?.message || '').toLowerCase();
+  if (!message) return false;
+  if (/http\s+429/.test(message)) return false;
+  const match = /http\s+(\d{3})/.exec(message);
+  if (match) {
+    const code = Number(match[1]);
+    if (Number.isFinite(code)) {
+      if (code >= 500) return true;
+      if ([400, 408, 409, 413, 415, 422].includes(code)) return true;
+    }
+  }
+  if (message.includes('json')) return true;
+  if (message.includes('schema')) return true;
+  if (message.includes('response_format')) return true;
+  return false;
+}
+
 export async function textModels(client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   return c.listModels('text');
@@ -135,51 +160,89 @@ export async function chat(payload, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   const referrer = resolveReferrer();
   const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...extra } = payload || {};
+  const { response_format: providedResponseFormat, jsonMode, ...rest } = extra || {};
+  const responseFormat = providedResponseFormat || (jsonMode ? { type: 'json_object' } : null);
 
   const url = `${c.textPromptBase}/openai`;
   const filteredMessages = Array.isArray(messages) ? messages.filter(m => !m || typeof m !== 'object' || m.role !== 'system') : [];
-  const body = {
+  const baseBody = {
     model: selectedModel,
     messages: filteredMessages,
     ...(referrer ? { referrer } : {}),
-    ...(extra.seed != null ? { seed: extra.seed } : {}),
+    ...(rest.seed != null ? { seed: rest.seed } : {}),
     ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
-    ...(extra.response_format ? { response_format: extra.response_format } : (extra.jsonMode ? { response_format: { type: 'json_object' } } : {})),
+    ...rest,
   };
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), c.timeoutMs);
+  const wantsJson = !!responseFormat;
+  const attemptModes = wantsJson ? [true, false] : [false];
+  let fallbackUsed = false;
+  let lastError = null;
   try {
-    try {
-      let log = (globalThis && globalThis.__PANEL_LOG__);
-      if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
-      if (log && Array.isArray(log)) {
-        log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai', json: !!extra?.response_format } });
+    for (const useJson of attemptModes) {
+      const attemptBody = { ...baseBody };
+      if (useJson && responseFormat) {
+        attemptBody.response_format = responseFormat;
+      } else {
+        delete attemptBody.response_format;
       }
-    } catch {}
-    const t0 = Date.now();
-    const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
-    const ms = Date.now() - t0;
-    if (!r.ok) {
-      try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:error', url, model: selectedModel, ok: false, status: r.status, ms }); } catch {}
-      throw new Error(`HTTP ${r.status}`);
+      try {
+        try {
+          let log = (globalThis && globalThis.__PANEL_LOG__);
+          if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
+          if (log && Array.isArray(log)) {
+            log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { tool_count: Array.isArray(tools) ? tools.length : 0, endpoint: endpoint || 'openai', json: useJson } });
+          }
+        } catch {}
+        const t0 = Date.now();
+        const r = await c.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(attemptBody), signal: controller.signal });
+        const ms = Date.now() - t0;
+        if (!r.ok) {
+          try {
+            const log = (globalThis && globalThis.__PANEL_LOG__);
+            if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:error', url, model: selectedModel, ok: false, status: r.status, ms, meta: { json: useJson } });
+          } catch {}
+          const err = new Error(`HTTP ${r.status}`);
+          err.status = r.status;
+          err.statusText = r.statusText;
+          throw err;
+        }
+        const data = await r.json();
+        try {
+          if (data && typeof data === 'object') {
+            const meta = data.metadata && typeof data.metadata === 'object' ? data.metadata : (data.metadata = {});
+            meta.requested_model = selectedModel;
+            meta.requestedModel = selectedModel;
+            meta.endpoint = endpoint || 'openai';
+            meta.response_format_requested = wantsJson;
+            meta.response_format_used = !!(useJson && responseFormat);
+            meta.jsonFallbackUsed = !!fallbackUsed;
+            if (!Array.isArray(data.modelAliases)) data.modelAliases = [];
+            if (!data.modelAliases.includes(selectedModel)) data.modelAliases.push(selectedModel);
+          }
+        } catch {}
+        try {
+          const log = (globalThis && globalThis.__PANEL_LOG__);
+          if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:response', url, model: data?.model || null, ok: true, ms, meta: { json: useJson, fallback: fallbackUsed } });
+        } catch {}
+        return data;
+      } catch (error) {
+        lastError = error;
+        if (useJson && wantsJson && !fallbackUsed && shouldRetryWithoutJson(error)) {
+          fallbackUsed = true;
+          try {
+            const log = (globalThis && globalThis.__PANEL_LOG__);
+            if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:retry', url, model: selectedModel, meta: { reason: 'json_fallback' } });
+          } catch {}
+          continue;
+        }
+        throw error;
+      }
     }
-    const data = await r.json();
-    try {
-      if (data && typeof data === 'object') {
-        const meta = data.metadata && typeof data.metadata === 'object' ? data.metadata : (data.metadata = {});
-        meta.requested_model = selectedModel;
-        meta.requestedModel = selectedModel;
-        meta.endpoint = endpoint || 'openai';
-        if (!Array.isArray(data.modelAliases)) data.modelAliases = [];
-        if (!data.modelAliases.includes(selectedModel)) data.modelAliases.push(selectedModel);
-      }
-    } catch {}
-    try {
-      const log = (globalThis && globalThis.__PANEL_LOG__);
-      if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:response', url, model: data?.model || null, ok: true, ms });
-    } catch {}
-    return data;
+    if (lastError) throw lastError;
+    throw new Error('Chat request failed without response.');
   } finally {
     try {
       const log = (globalThis && globalThis.__PANEL_LOG__);
