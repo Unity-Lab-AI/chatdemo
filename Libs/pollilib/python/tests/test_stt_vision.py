@@ -12,23 +12,39 @@ def test_transcribe_audio_tmpfile(tmp_path: tempfile.TemporaryDirectory):
         f.write(b'RIFF....WAVEfmt ')
 
     fs = FakeSession()
-    fs.post = lambda url, **kw: FakeResponse(json_data={"choices": [{"message": {"content": "transcribed"}}]})
+
+    captured = {}
+
+    def fake_post(url, **kw):
+        captured['payload'] = kw.get('json')
+        return FakeResponse(json_data={"choices": [{"message": {"content": "transcribed"}}]})
+
+    fs.post = fake_post
     c = PolliClient(session=fs)
     out = c.transcribe_audio(audio_path)
     assert out == 'transcribed'
+    assert captured['payload']["safe"] is False
 
 
 def test_vision_analyze_url_and_file(tmp_path: tempfile.TemporaryDirectory):
     fs = FakeSession()
-    fs.post = lambda url, **kw: FakeResponse(json_data={"choices": [{"message": {"content": "This is a bridge"}}]})
+    captured = []
+
+    def fake_post(url, **kw):
+        captured.append(kw.get('json'))
+        return FakeResponse(json_data={"choices": [{"message": {"content": "This is a bridge"}}]})
+
+    fs.post = fake_post
     c = PolliClient(session=fs)
     # URL
     out1 = c.analyze_image_url('http://x/y.jpg')
     assert out1 == 'This is a bridge'
+    assert captured[0]["safe"] is False
     # File
     img_path = os.path.join(tmp_path, 'img.jpg')
     with open(img_path, 'wb') as f:
         f.write(b'\xff\xd8\xff')
     out2 = c.analyze_image_file(img_path)
     assert out2 == 'This is a bridge'
+    assert captured[1]["safe"] is False
 

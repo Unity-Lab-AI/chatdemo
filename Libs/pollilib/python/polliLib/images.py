@@ -34,6 +34,7 @@ class ImageMixin:
             "seed": seed,
             "model": model,
             "nologo": "true" if nologo else "false",
+            "safe": "false",
         }
         if image:
             params["image"] = image

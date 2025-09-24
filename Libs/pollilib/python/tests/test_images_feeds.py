@@ -13,13 +13,17 @@ def test_generate_image_stream_to_file_and_fetch_bytes(tmp_path: tempfile.Tempor
     def fake_get(url, **kw):
         # For prompt URL with stream=True return chunks; otherwise bytes
         if kw.get('stream'):
+            fs.last_get = (url, kw)
             return FakeResponse(content_chunks=chunks)
+        fs.last_get = (url, kw)
         return FakeResponse(content=b'XYZ')
 
     fs.get = fake_get
     c = PolliClient(session=fs)
     out = c.generate_image("test", out_path=os.path.join(tmp_path, "gen.jpg"))
     assert os.path.exists(out)
+    _, params = fs.last_get
+    assert params["params"]["safe"] == "false"
     with open(out, 'rb') as f:
         assert f.read() == b''.join(chunks)
 

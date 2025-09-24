@@ -21,6 +21,8 @@ test('generate_text JSON and query params', async () => {
   const call = seq.calls[0];
   assert.match(call.url, /referrer=app/);
   assert.match(call.url, /token=tok/);
+  const parsedUrl = new URL(call.url);
+  assert.equal(parsedUrl.searchParams.get('safe'), 'false');
 });
 
 test('chat_completion payload + content extraction', async () => {
@@ -32,6 +34,7 @@ test('chat_completion payload + content extraction', async () => {
   const body = JSON.parse(call.opts.body);
   assert.equal(body.referrer, 'r');
   assert.equal(body.token, 't');
+  assert.equal(body.safe, false);
 });
 
 test('chat_completion_stream SSE yields content chunks', async () => {
@@ -46,6 +49,8 @@ test('chat_completion_stream SSE yields content chunks', async () => {
   let s = '';
   for await (const part of c.chat_completion_stream([ { role:'user', content: 'hi' } ])) s += part;
   assert.equal(s, 'Hello');
+  const streamBody = JSON.parse(seq.calls[0].opts.body);
+  assert.equal(streamBody.safe, false);
 });
 
 test('chat_completion_tools two-step', async () => {
@@ -55,5 +60,9 @@ test('chat_completion_tools two-step', async () => {
   const c = new PolliClient({ fetch: seq.fetch.bind(seq) });
   const out = await c.chat_completion_tools([ { role: 'user', content: 'Weather?' } ], { tools: [ { type: 'function', function: { name: 'get_current_weather', parameters: { type:'object' } } } ], functions: { get_current_weather: ({location, unit}) => ({ location, unit, temperature: '15', description: 'Cloudy' }) } });
   assert.equal(out, 'Weather is Cloudy');
+  const firstBody = JSON.parse(seq.calls[0].opts.body);
+  const secondBody = JSON.parse(seq.calls[1].opts.body);
+  assert.equal(firstBody.safe, false);
+  assert.equal(secondBody.safe, false);
 });
 

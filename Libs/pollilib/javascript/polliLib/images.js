@@ -20,6 +20,7 @@ export const ImagesMixin = (Base) => class extends Base {
     if (!(width > 0) || !(height > 0)) throw new Error('width and height must be positive integers');
     if (seed == null) seed = this._randomSeed();
     const params = new URLSearchParams({ width: String(width), height: String(height), seed: String(seed), model: String(model), nologo: nologo ? 'true' : 'false' });
+    params.set('safe', 'false');
     if (image) params.set('image', image);
     if (referrer) params.set('referrer', referrer);
     if (token) params.set('token', token);

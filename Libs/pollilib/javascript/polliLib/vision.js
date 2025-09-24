@@ -9,6 +9,7 @@ export const VisionMixin = (Base) => class extends Base {
     if (typeof max_tokens === 'number') payload.max_tokens = max_tokens;
     if (referrer) payload.referrer = referrer;
     if (token) payload.token = token;
+    payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
@@ -35,6 +36,7 @@ export const VisionMixin = (Base) => class extends Base {
     if (typeof max_tokens === 'number') payload.max_tokens = max_tokens;
     if (referrer) payload.referrer = referrer;
     if (token) payload.token = token;
+    payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);

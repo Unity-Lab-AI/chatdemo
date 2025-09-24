@@ -33,6 +33,7 @@ export async function run() {
   const defaultPayload = JSON.parse(requests[0].init.body);
   assert.equal(defaultPayload.model, 'openai');
   assert.deepEqual(defaultPayload.messages, messages);
+  assert.equal(defaultPayload.safe, false);
 
   const seedResponse = await chat({ endpoint: 'seed', model: 'unity', messages, tools }, client);
   assert.equal(seedResponse.model, 'unity');
@@ -43,4 +44,5 @@ export async function run() {
   const parsedSeedBody = JSON.parse(requests[1].init.body);
   assert.equal(parsedSeedBody.model, 'unity');
   assert.deepEqual(parsedSeedBody.messages, messages);
+  assert.equal(parsedSeedBody.safe, false);
 }

@@ -38,6 +38,7 @@ export async function run() {
   assert.ok(url.pathname.length > 1, 'Prompt is encoded in the path');
   assert.equal(url.searchParams.get('model'), 'webgpt');
   assert.equal(url.searchParams.get('referrer'), 'https://github.com/Unity-Lab-AI/chatdemo');
+  assert.equal(url.searchParams.get('safe'), 'false');
 
   requests.length = 0;
   const defaultClient = new PolliClient({ fetch: fakeFetch });
@@ -52,4 +53,5 @@ export async function run() {
   assert.ok(defaultUrl.pathname.length > 1);
   // model defaults to 'openai' in PolliLib generate_text
   assert.equal(defaultUrl.searchParams.get('model'), 'openai');
+  assert.equal(defaultUrl.searchParams.get('safe'), 'false');
 }
