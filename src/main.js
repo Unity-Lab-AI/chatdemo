@@ -2,7 +2,7 @@ import './style.css';
 import 'highlight.js/styles/github.css';
 import { renderMarkdown, enhanceCodeBlocksHtml } from './lib/markdown.js';
 import { looseJsonParse, repairModelOutput } from './lib/json-repair.js';
-import { chat, image, textModels } from '../Libs/pollilib/index.js';
+import { chat, chatStream, image, textModels } from '../Libs/pollilib/index.js';
 import { generateSeed } from './seed.js';
 import { createPollinationsClient } from './pollinations-client.js';
 import {
@@ -278,6 +278,53 @@ function renderDebugPanel(extra = {}) {
     debugEl.textContent = JSON.stringify(redacted, null, 2);
   } else {
     debugEl.textContent = JSON.stringify(payload, null, 2);
+  }
+}
+
+// Fast-path streaming for text-only prompts to improve perceived latency
+async function sendPromptStreaming(prompt) {
+  const selectedModel = getSelectedModel();
+  if (!selectedModel) throw new Error('No model selected.');
+  if (!client) throw new Error('Pollinations client is not ready.');
+  const endpoints = buildEndpointSequence(selectedModel);
+  if (!endpoints.length) throw new Error(`No endpoints available for model "${selectedModel.label ?? selectedModel.id}".`);
+
+  const startingLength = state.conversation.length;
+  // Do NOT inject the JSON primer for streaming text-only turns
+  state.conversation.push({ role: 'user', content: prompt });
+  try {
+    setStatus('Streaming response…');
+    const assistantMsg = addMessage({ role: 'assistant', type: 'text', content: '' });
+    const pinnedId = state.pinnedModelId || selectedModel.id;
+    const endpoint = endpoints[0] || 'openai';
+    state.activeModel = { id: pinnedId, endpoint, info: selectedModel };
+    if (!state.pinnedModelId) state.pinnedModelId = pinnedId;
+    let streamed = '';
+    try {
+      for await (const chunk of chatStream({ model: pinnedId, endpoint, messages: state.conversation, seed: generateSeed() }, client)) {
+        if (typeof chunk === 'string' && chunk) {
+          streamed += chunk;
+          assistantMsg.content = streamed;
+          renderMessages();
+        }
+      }
+    } catch (e) {
+      // Fallback to existing non-stream flow
+      console.warn('Streaming failed; falling back to standard request', e);
+      state.conversation.length = startingLength; // revert user injection
+      return await sendPrompt(prompt);
+    }
+    if (streamed.trim()) {
+      state.conversation.push({ role: 'assistant', content: streamed });
+      if (state.voicePlayback && els.voiceSelect.value) {
+        void speakMessage(assistantMsg, { autoplay: true });
+      }
+    }
+    resetStatusIfIdle();
+  } catch (error) {
+    console.error('Chat error (streaming)', error);
+    state.conversation.length = startingLength;
+    throw error;
   }
 }
 
@@ -1859,8 +1906,8 @@ async function generateImageAsset(prompt, { width, height, model: imageModel, se
     }
     const resolvedSeed = (typeof seed === 'number' || (typeof seed === 'string' && seed.trim().length)) ? seed : generateSeed();
     const dims = [];
-    const w = Number(width) || 1024;
-    const h = Number(height) || 1024;
+    const w = Number(width) || 768;
+    const h = Number(height) || 768;
     dims.push([w, h]);
     if (w > 512 || h > 512) dims.push([512, 512]);
 
@@ -2338,7 +2385,13 @@ els.form.addEventListener('submit', async event => {
       console.info('Generated Pollinations image with seed %s.', seed);
       resetStatusIfIdle();
     } else {
-      await sendPrompt(raw);
+      // Stream for non-image prompts to speed up perceived latency
+      const wantsImage = hasImageIntent(raw);
+      if (!wantsImage) {
+        await sendPromptStreaming(raw);
+      } else {
+        await sendPrompt(raw);
+      }
     }
   } catch (error) {
     console.error('Submission error', error);

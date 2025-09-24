@@ -255,6 +255,86 @@ export async function chat(payload, client) {
   }
 }
 
+// Streaming chat helper (SSE). Yields content deltas as strings.
+export async function* chatStream(payload, client) {
+  const c = client instanceof PolliClient ? client : new PolliClient();
+  const referrer = resolveReferrer();
+  const { endpoint = 'openai', model: selectedModel = 'openai', messages = [], tools = null, tool_choice = 'auto', ...rest } = payload || {};
+  // Intentionally do not set response_format here to keep tokens human-readable
+  const filteredMessages = Array.isArray(messages) ? messages.filter(m => !m || typeof m !== 'object' || m.role !== 'system') : [];
+  const url = `${c.textPromptBase}/openai`;
+  const body = {
+    model: selectedModel,
+    messages: filteredMessages,
+    stream: true,
+    ...(referrer ? { referrer } : {}),
+    ...(rest.seed != null ? { seed: rest.seed } : {}),
+    ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
+    ...rest,
+  };
+  body.safe = false;
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), c.timeoutMs);
+  try {
+    try {
+      let log = (globalThis && globalThis.__PANEL_LOG__);
+      if (!log && globalThis) { globalThis.__PANEL_LOG__ = []; log = globalThis.__PANEL_LOG__; }
+      if (log && Array.isArray(log)) {
+        log.push({ ts: Date.now(), kind: 'chat:request', url, model: selectedModel, referer: referrer || null, meta: { endpoint: endpoint || 'openai', json: false, stream: true } });
+      }
+    } catch {}
+    const resp = await c.fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const err = new Error(`HTTP ${resp.status}`);
+      err.status = resp.status;
+      err.statusText = resp.statusText;
+      try { const log = (globalThis && globalThis.__PANEL_LOG__); if (log && Array.isArray(log)) log.push({ ts: Date.now(), kind: 'chat:error', url, model: selectedModel, ok: false, status: resp.status, meta: { stream: true } }); } catch {}
+      throw err;
+    }
+    // Iterate SSE lines
+    const reader = resp.body && typeof resp.body.getReader === 'function' ? resp.body.getReader() : null;
+    if (reader) {
+      const decoder = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split(/\r?\n/);
+        buf = parts.pop() ?? '';
+        for (const line of parts) {
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (data === '[DONE]') { buf = ''; break; }
+          try {
+            const obj = JSON.parse(data);
+            const content = obj?.choices?.[0]?.delta?.content;
+            if (content) yield content;
+          } catch {
+            // ignore non-JSON chunks
+          }
+        }
+      }
+    } else {
+      // Fallback: parse entire body if streaming unsupported
+      const text = await resp.text();
+      for (const line of String(text).split(/\r?\n/)) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') break;
+        try { const obj = JSON.parse(data); const content = obj?.choices?.[0]?.delta?.content; if (content) yield content; } catch {}
+      }
+    }
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function image(prompt, options, client) {
   const c = client instanceof PolliClient ? client : new PolliClient();
   const referrer = resolveReferrer();
