@@ -804,6 +804,17 @@ async function playMessageAudio(message) {
 let currentTtsJob = null;
 const ttsQueue = [];
 const ttsJobsByMessage = new Map();
+const ttsFetchQueue = [];
+let ttsFetchWorkerActive = false;
+let lastTtsFetchEndedAt = 0;
+let ttsFetchCooldownMs = 750;
+const TTS_PREFETCH_AHEAD = 3;
+const TTS_FETCH_MAX_RETRIES = 4;
+const TTS_FETCH_MIN_COOLDOWN_MS = 350;
+const TTS_FETCH_MAX_COOLDOWN_MS = 4500;
+const TTS_FETCH_FAST_THRESHOLD_MS = 1800;
+const TTS_FETCH_SLOW_THRESHOLD_MS = 4200;
+const TTS_FETCH_VERY_SLOW_THRESHOLD_MS = 6500;
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRhYAAABXQVZFZm10IBIAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
 const TTS_CHUNK_MAX_CHARS = 250;
 const TTS_CHUNK_ERROR = Symbol('tts-chunk-error');
@@ -1043,6 +1054,154 @@ async function fetchTtsAudioUrl(text, voice) {
   throw new Error('TTS fetch failed for all attempts');
 }
 
+function clampTtsCooldown(value) {
+  return Math.max(TTS_FETCH_MIN_COOLDOWN_MS, Math.min(TTS_FETCH_MAX_COOLDOWN_MS, value));
+}
+
+function adjustTtsCooldownOnSuccess(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    ttsFetchCooldownMs = clampTtsCooldown(Math.round(ttsFetchCooldownMs * 0.9) || TTS_FETCH_MIN_COOLDOWN_MS);
+    return;
+  }
+  if (durationMs >= TTS_FETCH_VERY_SLOW_THRESHOLD_MS) {
+    const target = clampTtsCooldown(Math.round(durationMs * 0.35));
+    ttsFetchCooldownMs = Math.max(ttsFetchCooldownMs, target);
+  } else if (durationMs >= TTS_FETCH_SLOW_THRESHOLD_MS) {
+    ttsFetchCooldownMs = clampTtsCooldown(Math.round(ttsFetchCooldownMs * 1.1));
+  } else if (durationMs <= TTS_FETCH_FAST_THRESHOLD_MS) {
+    ttsFetchCooldownMs = clampTtsCooldown(Math.round(ttsFetchCooldownMs * 0.7));
+  } else {
+    ttsFetchCooldownMs = clampTtsCooldown(Math.round(ttsFetchCooldownMs * 0.85));
+  }
+}
+
+function adjustTtsCooldownOnError() {
+  ttsFetchCooldownMs = clampTtsCooldown(Math.round(ttsFetchCooldownMs * 1.65 + 320));
+}
+
+function removeQueuedFetchesForJob(job) {
+  if (!job) return;
+  for (let i = ttsFetchQueue.length - 1; i >= 0; i -= 1) {
+    if (ttsFetchQueue[i]?.job === job) {
+      ttsFetchQueue.splice(i, 1);
+    }
+  }
+  if (job.pendingFetches && typeof job.pendingFetches.clear === 'function') {
+    job.pendingFetches.clear();
+  }
+}
+
+function queueTtsFetch(job, index, attempt = 0, delayMs = 0) {
+  if (!job || job.cancelled || job.completed) return;
+  if (!Array.isArray(job.groups) || !job.groups[index]) return;
+  if (job.pendingFetches?.has(index)) return;
+  const task = {
+    job,
+    index,
+    attempt,
+    readyAt: Date.now() + Math.max(0, delayMs || 0),
+  };
+  if (job.pendingFetches) {
+    job.pendingFetches.add(index);
+  }
+  ttsFetchQueue.push(task);
+  ttsFetchQueue.sort((a, b) => (a.readyAt || 0) - (b.readyAt || 0));
+  runTtsFetchQueue();
+}
+
+function scheduleMoreTtsFetches(job) {
+  if (!job || job.cancelled || job.completed || currentTtsJob !== job) return;
+  while (
+    job.nextFetchIndex < job.groups.length &&
+    (job.nextFetchIndex - job.playIndex) <= TTS_PREFETCH_AHEAD &&
+    ((job.pendingFetches?.size ?? 0) + job.inflight) < (TTS_PREFETCH_AHEAD + 1)
+  ) {
+    queueTtsFetch(job, job.nextFetchIndex);
+    job.nextFetchIndex += 1;
+  }
+}
+
+function runTtsFetchQueue() {
+  if (ttsFetchWorkerActive) return;
+  ttsFetchWorkerActive = true;
+  (async () => {
+    try {
+      while (ttsFetchQueue.length) {
+        const task = ttsFetchQueue[0];
+        if (!task) break;
+        const now = Date.now();
+        if (task.readyAt && task.readyAt > now) {
+          await sleep(Math.min(task.readyAt - now, 250));
+          continue;
+        }
+        ttsFetchQueue.shift();
+        const { job, index, attempt } = task;
+        if (!job) continue;
+        job.pendingFetches?.delete(index);
+        if (job.cancelled || job.completed || currentTtsJob !== job) {
+          continue;
+        }
+        if (typeof job.results[index] !== 'undefined') {
+          scheduleMoreTtsFetches(job);
+          continue;
+        }
+        if (!job.groups || !job.groups[index]) {
+          scheduleMoreTtsFetches(job);
+          continue;
+        }
+
+        const wait = Math.max(0, (lastTtsFetchEndedAt + ttsFetchCooldownMs) - Date.now());
+        if (wait > 0) {
+          await sleep(wait);
+        }
+
+        job.inflight += 1;
+        setTtsChunkState(job, index, 'sent');
+        const fetchStart = Date.now();
+        let url = null;
+        let error = null;
+        try {
+          url = await fetchTtsAudioUrl(job.groups[index], job.voice);
+        } catch (err) {
+          error = err;
+        }
+        const duration = Date.now() - fetchStart;
+        job.inflight = Math.max(0, job.inflight - 1);
+        lastTtsFetchEndedAt = Date.now();
+
+        if (job.cancelled || job.completed || currentTtsJob !== job) {
+          continue;
+        }
+
+        if (!error && url) {
+          job.results[index] = url;
+          setTtsChunkState(job, index, 'received');
+          adjustTtsCooldownOnSuccess(duration);
+          tryStartPlayback(job);
+        } else {
+          console.warn('TTS fetch failed', error);
+          adjustTtsCooldownOnError();
+          if (attempt + 1 < TTS_FETCH_MAX_RETRIES) {
+            const retryDelay = Math.min(4000, Math.round((attempt + 1) * 900 + Math.random() * 250));
+            queueTtsFetch(job, index, attempt + 1, retryDelay);
+          } else {
+            job.results[index] = TTS_CHUNK_ERROR;
+            setTtsChunkState(job, index, 'error');
+            tryStartPlayback(job);
+          }
+        }
+
+        scheduleMoreTtsFetches(job);
+      }
+    } finally {
+      ttsFetchWorkerActive = false;
+      if (ttsFetchQueue.length) {
+        runTtsFetchQueue();
+      }
+    }
+  })();
+}
+
 function isMessageInTtsPipeline(messageId) {
   if (messageId == null) return false;
   if (currentTtsJob && !currentTtsJob.cancelled && currentTtsJob.messageId === messageId) return true;
@@ -1070,6 +1229,7 @@ function ensureTtsStatusElement(job) {
 
 function cancelTtsJob(job, { resetPending = false } = {}) {
   if (!job) return;
+  removeQueuedFetchesForJob(job);
   job.cancelled = true;
   for (const t of job.timers) clearTimeout(t);
   job.timers.length = 0;
@@ -1079,6 +1239,7 @@ function cancelTtsJob(job, { resetPending = false } = {}) {
   job.audio = null;
   job.activeIndex = null;
   job.inflight = 0;
+  job.nextFetchIndex = job.groups.length;
   if (resetPending && Array.isArray(job.status)) {
     for (let i = 0; i < job.status.length; i += 1) {
       if (job.status[i] !== 'done' && job.status[i] !== 'error') {
@@ -1125,6 +1286,7 @@ function createTtsJob(message, voice) {
     status: new Array(chunks.length).fill('pending'),
     statusEl: null,
     started: false,
+    pendingFetches: new Set(),
   };
 }
 
@@ -1147,59 +1309,13 @@ function beginTtsJob(job) {
   job.completed = false;
   ensureTtsStatusElement(job);
   renderTtsStatus(job);
-
-  const scheduleNextFetch = () => {
-    if (job.cancelled || job.completed || currentTtsJob !== job) return;
-    if (job.nextFetchIndex >= job.groups.length) return;
-    if (job.inflight >= 2) {
-      const wait = setTimeout(scheduleNextFetch, 250);
-      job.timers.push(wait);
-      return;
-    }
-    const index = job.nextFetchIndex++;
-    const fetchChunk = (attempt = 0) => {
-      if (job.cancelled || job.completed || currentTtsJob !== job) return;
-      job.inflight += 1;
-      setTtsChunkState(job, index, 'sent');
-      (async () => {
-        try {
-          const url = await fetchTtsAudioUrl(job.groups[index], job.voice);
-          if (!job.cancelled && !job.completed && currentTtsJob === job) {
-            job.results[index] = url;
-            setTtsChunkState(job, index, 'received');
-            tryStartPlayback(job);
-          }
-        } catch (e) {
-          if (!job.cancelled && !job.completed && currentTtsJob === job) {
-            console.warn('TTS fetch failed', e);
-            const maxRetries = 3;
-            if (attempt + 1 < maxRetries) {
-              const delay = [750, 1500, 3000][Math.min(attempt, 2)];
-              const timer = setTimeout(() => fetchChunk(attempt + 1), delay);
-              job.timers.push(timer);
-            } else {
-              job.results[index] = TTS_CHUNK_ERROR;
-              setTtsChunkState(job, index, 'error');
-              tryStartPlayback(job);
-            }
-          }
-        } finally {
-          job.inflight = Math.max(0, job.inflight - 1);
-        }
-      })();
-    };
-    fetchChunk(0);
-    if (job.nextFetchIndex < job.groups.length) {
-      const t = setTimeout(scheduleNextFetch, 3000);
-      job.timers.push(t);
-    }
-  };
-  scheduleNextFetch();
+  scheduleMoreTtsFetches(job);
 }
 
 function completeTtsJob(job) {
   if (!job || job.completed) return;
   job.completed = true;
+  removeQueuedFetchesForJob(job);
   for (const t of job.timers) clearTimeout(t);
   job.timers.length = 0;
   if (job.audio) {
@@ -1253,11 +1369,13 @@ function tryStartPlayback(job) {
     if (typeof result === 'undefined') return; // not ready yet
     if (result === TTS_CHUNK_ERROR) {
       job.playIndex += 1;
+      scheduleMoreTtsFetches(job);
       continue;
     }
     const url = result;
     if (!url) {
       job.playIndex += 1;
+      scheduleMoreTtsFetches(job);
       continue;
     }
     const audio = new Audio(url);
@@ -1330,6 +1448,7 @@ function tryStartPlayback(job) {
       job.activeIndex = null;
       job.audio = null;
       job.playIndex += 1;
+      scheduleMoreTtsFetches(job);
       tryStartPlayback(job);
     });
     audio.addEventListener('error', () => {
@@ -1338,6 +1457,7 @@ function tryStartPlayback(job) {
       job.activeIndex = null;
       job.audio = null;
       job.playIndex += 1; // skip broken chunk
+      scheduleMoreTtsFetches(job);
       tryStartPlayback(job);
     });
     return;
