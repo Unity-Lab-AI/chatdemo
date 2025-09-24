@@ -1391,6 +1391,33 @@ function startVoicePlaybackForMessage(message, voice) {
 function tryStartPlayback(job) {
   if (!job || job.cancelled || job.completed) return;
   if (currentTtsJob && currentTtsJob !== job) return;
+  // Before starting the very first chunk, ensure an initial ready buffer is available
+  // Start threshold rules:
+  // - 1 total chunk  -> need 1 ready
+  // - 2 total chunks -> need 2 ready
+  // - 3+ total       -> need 3 ready
+  if (!job.started) {
+    const total = Array.isArray(job.groups) ? job.groups.length : 0;
+    const required = total >= 3 ? 3 : (total === 2 ? 2 : 1);
+    let readyAhead = 0;
+    for (let i = job.playIndex; i < total; i += 1) {
+      const r = job.results[i];
+      if (typeof r === 'string' && r) {
+        readyAhead += 1;
+        if (readyAhead >= required) break;
+      } else if (r === TTS_CHUNK_ERROR) {
+        // treat as consumable but empty; still counts toward moving forward smoothly
+        readyAhead += 1;
+        if (readyAhead >= required) break;
+      } else {
+        break; // stop at first not-ready
+      }
+    }
+    if (readyAhead < required) {
+      // Not enough ready to start yet; fetching continues in the background
+      return;
+    }
+  }
   if (typeof job.activeIndex === 'number') {
     const activeStatus = job.status[job.activeIndex];
     if (activeStatus !== 'done' && activeStatus !== 'error') {
@@ -1457,6 +1484,7 @@ function tryStartPlayback(job) {
       if (job.cancelled || job.completed || currentTtsJob !== job) return;
       if (!started) {
         started = true;
+        job.started = true; // mark job as started after first audible playback
         setTtsChunkState(job, index, 'speaking');
         clearWatchdog();
       }
