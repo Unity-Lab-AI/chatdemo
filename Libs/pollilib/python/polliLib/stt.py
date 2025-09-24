@@ -42,8 +42,27 @@ class STTMixin:
         payload["safe"] = False
         url = f"{self.text_prompt_base}/{provider}"
         headers = {"Content-Type": "application/json"}
-        resp = self.session.post(url, headers=headers, json=payload, timeout=timeout or self.timeout)
-        resp.raise_for_status()
-        data = resp.json()
+        attempt = 0
+        response = None
+        while True:
+            with self._request_lock:
+                self._wait_before_attempt(attempt)
+                resp = self.session.post(url, headers=headers, json=payload, timeout=timeout or self.timeout)
+                if self._should_retry_status(resp.status_code):
+                    if not self._can_retry(attempt + 1):
+                        resp.raise_for_status()
+                    resp.close()
+                    attempt += 1
+                    continue
+                try:
+                    resp.raise_for_status()
+                except Exception:
+                    resp.close()
+                    raise
+                self._mark_success()
+                response = resp
+                break
+        data = response.json()
+        response.close()
         return data.get("choices", [{}])[0].get("message", {}).get("content")
 

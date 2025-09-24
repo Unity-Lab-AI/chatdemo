@@ -50,6 +50,10 @@ class FakeResponse:
 
     def __exit__(self, exc_type, exc, tb):
         self._closed = True
+        return False
+
+    def close(self):
+        self._closed = True
 
 
 class FakeSession:

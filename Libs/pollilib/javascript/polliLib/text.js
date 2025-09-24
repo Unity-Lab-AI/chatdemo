@@ -10,18 +10,20 @@ export const TextMixin = (Base) => class extends Base {
     if (system) url.searchParams.set('system', system);
     if (referrer) url.searchParams.set('referrer', referrer);
     if (token) url.searchParams.set('token', token);
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
-    try {
-      const resp = await this.fetch(url, { method: 'GET', signal: controller.signal });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      if (asJson) {
-        const text = await resp.text();
-        try { return JSON.parse(text); } catch { return text; }
+    const response = await this._rateLimitedRequest(async () => {
+      const controller = new AbortController();
+      const limit = timeoutMs ?? this.timeoutMs;
+      const t = setTimeout(() => controller.abort(), limit);
+      try {
+        return await this.fetch(url, { method: 'GET', signal: controller.signal });
+      } finally {
+        clearTimeout(t);
       }
-      return await resp.text();
-    } finally {
-      clearTimeout(t);
+    });
+    if (asJson) {
+      const text = await response.text();
+      try { return JSON.parse(text); } catch { return text; }
     }
+    return await response.text();
   }
 };

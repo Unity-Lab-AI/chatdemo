@@ -117,3 +117,46 @@ def test_chat_completion_tools_one_round():
     assert len(fs.posts) == 2
     assert all(post[2].get("safe") is False for post in fs.posts)
 
+
+def test_generate_text_spacing_enforced():
+    class SeqSession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.responses = [
+                FakeResponse(text="one"),
+                FakeResponse(text="two"),
+            ]
+
+        def get(self, url, **kw):
+            self.last_get = (url, kw)
+            return self.responses.pop(0)
+
+    sleeps = []
+    c = PolliClient(session=SeqSession(), sleep=lambda seconds: sleeps.append(seconds))
+    first = c.generate_text("hello")
+    second = c.generate_text("world")
+    assert first == "one" and second == "two"
+    assert any(delay >= 2.99 for delay in sleeps)
+
+
+def test_generate_text_retry_backoff():
+    class SeqSession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.responses = [
+                FakeResponse(status=429, text="limit"),
+                FakeResponse(status=503, text="busy"),
+                FakeResponse(text="done"),
+            ]
+
+        def get(self, url, **kw):
+            self.last_get = (url, kw)
+            return self.responses.pop(0)
+
+    sleeps = []
+    c = PolliClient(session=SeqSession(), sleep=lambda seconds: sleeps.append(seconds))
+    out = c.generate_text("retry")
+    assert out == "done"
+    rounded = [round(delay, 1) for delay in sleeps[:2]]
+    assert rounded == [0.5, 0.6]
+
