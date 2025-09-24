@@ -1,7 +1,16 @@
 import fs from 'node:fs';
 
 export const VisionMixin = (Base) => class extends Base {
-  async analyze_image_url(imageUrl, { question = "What's in this image?", model = 'openai', max_tokens = 500, referrer = null, token = null, timeoutMs = 60_000, asJson = false } = {}) {
+  async analyze_image_url(imageUrl, options = {}) {
+    const {
+      question = "What's in this image?",
+      model = 'openai',
+      max_tokens = 500,
+      referrer = null,
+      token = null,
+      timeoutMs,
+      asJson = false,
+    } = options;
     const payload = {
       model,
       messages: [ { role: 'user', content: [ { type: 'text', text: question }, { type: 'image_url', image_url: { url: imageUrl } } ] } ],
@@ -12,7 +21,7 @@ export const VisionMixin = (Base) => class extends Base {
     payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
+    const t = setTimeout(() => controller.abort(), this._resolveTimeout(timeoutMs, 60_000));
     try {
       const resp = await this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -22,7 +31,16 @@ export const VisionMixin = (Base) => class extends Base {
     } finally { clearTimeout(t); }
   }
 
-  async analyze_image_file(imagePath, { question = "What's in this image?", model = 'openai', max_tokens = 500, referrer = null, token = null, timeoutMs = 60_000, asJson = false } = {}) {
+  async analyze_image_file(imagePath, options = {}) {
+    const {
+      question = "What's in this image?",
+      model = 'openai',
+      max_tokens = 500,
+      referrer = null,
+      token = null,
+      timeoutMs,
+      asJson = false,
+    } = options;
     if (!fs.existsSync(imagePath)) throw new Error(`File not found: ${imagePath}`);
     let ext = String(imagePath).split('.').pop().toLowerCase();
     if (!['jpeg','jpg','png','gif','webp'].includes(ext)) ext = 'jpeg';
@@ -39,7 +57,7 @@ export const VisionMixin = (Base) => class extends Base {
     payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
+    const t = setTimeout(() => controller.abort(), this._resolveTimeout(timeoutMs, 60_000));
     try {
       const resp = await this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

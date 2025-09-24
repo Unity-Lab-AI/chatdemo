@@ -33,7 +33,7 @@ class BaseClient:
         image_url: str = "https://image.pollinations.ai/models",
         image_prompt_base: str = "https://image.pollinations.ai/prompt",
         text_prompt_base: str = "https://text.pollinations.ai",
-        timeout: float = 10.0,
+        timeout: float = 60.0,
         session: Optional[requests.Session] = None,
         min_request_interval: float = 3.0,
         retry_initial_delay: float = 0.5,
@@ -181,4 +181,34 @@ class BaseClient:
 
     def _should_retry_status(self, status: int) -> bool:
         return status in self._retryable_statuses
+
+    def _resolve_timeout(self, timeout: Optional[float], fallback: Optional[float]) -> float:
+        if timeout is not None:
+            try:
+                timeout_val = float(timeout)
+            except (TypeError, ValueError):
+                timeout_val = None
+            else:
+                if timeout_val > 0:
+                    return timeout_val
+        base_val: Optional[float]
+        try:
+            base_val = float(self.timeout)
+            if base_val <= 0:
+                base_val = None
+        except (TypeError, ValueError):
+            base_val = None
+        fallback_val: Optional[float] = None
+        if fallback is not None:
+            try:
+                fallback_candidate = float(fallback)
+                if fallback_candidate > 0:
+                    fallback_val = fallback_candidate
+            except (TypeError, ValueError):
+                fallback_val = None
+        if base_val is not None:
+            return base_val
+        if fallback_val is not None:
+            return fallback_val
+        return 60.0
 

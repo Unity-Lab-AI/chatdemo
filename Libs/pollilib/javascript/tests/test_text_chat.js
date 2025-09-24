@@ -100,3 +100,67 @@ test('generate_text retries quickly when hitting rate limits', async () => {
   assert.deepEqual(rounded.slice(0, 2), [500, 600]);
 });
 
+test('generate_text uses client timeout when not specified per-call', async () => {
+  let aborts = 0;
+  const fetch = (url, opts = {}) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout exceeded')), 500);
+    const onAbort = () => {
+      clearTimeout(timer);
+      aborts += 1;
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      reject(err);
+    };
+    if (opts.signal) {
+      if (opts.signal.aborted) { onAbort(); return; }
+      opts.signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+  const c = new PolliClient({
+    fetch,
+    timeoutMs: 25,
+    minRequestIntervalMs: 0,
+    retryInitialDelayMs: 0,
+    retryDelayStepMs: 0,
+    retryMaxDelayMs: 0,
+    sleep: async () => {},
+  });
+  const start = Date.now();
+  await assert.rejects(() => c.generate_text('hi'), (err) => /abort/i.test(err.name) || /abort/i.test(err.message));
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed >= 20 && elapsed < 200, `expected abort near 25ms, observed ${elapsed}`);
+  assert.equal(aborts, 1);
+});
+
+test('generate_text allows explicit timeout override per request', async () => {
+  let aborts = 0;
+  const fetch = (url, opts = {}) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout exceeded')), 500);
+    const onAbort = () => {
+      clearTimeout(timer);
+      aborts += 1;
+      const err = new Error('aborted');
+      err.name = 'AbortError';
+      reject(err);
+    };
+    if (opts.signal) {
+      if (opts.signal.aborted) { onAbort(); return; }
+      opts.signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+  const c = new PolliClient({
+    fetch,
+    timeoutMs: 250,
+    minRequestIntervalMs: 0,
+    retryInitialDelayMs: 0,
+    retryDelayStepMs: 0,
+    retryMaxDelayMs: 0,
+    sleep: async () => {},
+  });
+  const start = Date.now();
+  await assert.rejects(() => c.generate_text('hi', { timeoutMs: 40 }), (err) => /abort/i.test(err.name) || /abort/i.test(err.message));
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed >= 30 && elapsed < 200, `expected abort near 40ms, observed ${elapsed}`);
+  assert.equal(aborts, 1);
+});
+

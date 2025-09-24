@@ -14,7 +14,7 @@ class TextMixin:
         referrer: Optional[str] = None,
         token: Optional[str] = None,
         as_json: bool = False,
-        timeout: Optional[float] = 60.0,
+        timeout: Optional[float] = None,
     ) -> Any:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("prompt must be a non-empty string")
@@ -34,7 +34,7 @@ class TextMixin:
         if token:
             params["token"] = token
         url = self._text_prompt_url(prompt)
-        eff_timeout = timeout if timeout is not None else max(self.timeout, 10.0)
+        eff_timeout = self._resolve_timeout(timeout, 60.0)
         attempt = 0
         response = None
         while True:

@@ -79,7 +79,7 @@ def generate_image(
     image: Optional[str] = None,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 300.0,
+    timeout: Optional[float] = None,
     out_path: Optional[str] = None,
     chunk_size: int = 1024 * 64,
 ) -> bytes | str:
@@ -109,7 +109,7 @@ def save_image_timestamped(
     image: Optional[str] = None,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 300.0,
+    timeout: Optional[float] = None,
     images_dir: Optional[str] = None,
     filename_prefix: str = "",
     filename_suffix: str = "",
@@ -137,7 +137,7 @@ def fetch_image(
     *,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 120.0,
+    timeout: Optional[float] = None,
     out_path: Optional[str] = None,
     chunk_size: int = 1024 * 64,
 ) -> bytes | str:
@@ -160,7 +160,7 @@ def generate_text(
     referrer: Optional[str] = None,
     token: Optional[str] = None,
     as_json: bool = False,
-    timeout: Optional[float] = 60.0,
+    timeout: Optional[float] = None,
 ):
     return _client().generate_text(
         prompt,
@@ -183,7 +183,7 @@ def chat_completion(
     referrer: Optional[str] = None,
     token: Optional[str] = None,
     as_json: bool = False,
-    timeout: Optional[float] = 60.0,
+    timeout: Optional[float] = None,
 ):
     return _client().chat_completion(
         messages,
@@ -205,7 +205,7 @@ def chat_completion_stream(
     private: Optional[bool] = None,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 300.0,
+    timeout: Optional[float] = None,
     yield_raw_events: bool = False,
 ):
     return _client().chat_completion_stream(
@@ -232,7 +232,7 @@ def chat_completion_tools(
     referrer: Optional[str] = None,
     token: Optional[str] = None,
     as_json: bool = False,
-    timeout: Optional[float] = 60.0,
+    timeout: Optional[float] = None,
     max_rounds: int = 1,
 ):
     return _client().chat_completion_tools(
@@ -259,7 +259,7 @@ def transcribe_audio(
     provider: str = "openai",
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 120.0,
+    timeout: Optional[float] = None,
 ):
     return _client().transcribe_audio(
         audio_path,
@@ -280,7 +280,7 @@ def analyze_image_url(
     max_tokens: Optional[int] = 500,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 60.0,
+    timeout: Optional[float] = None,
     as_json: bool = False,
 ):
     return _client().analyze_image_url(
@@ -303,7 +303,7 @@ def analyze_image_file(
     max_tokens: Optional[int] = 500,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 60.0,
+    timeout: Optional[float] = None,
     as_json: bool = False,
 ):
     return _client().analyze_image_file(
@@ -322,7 +322,7 @@ def image_feed_stream(
     *,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 300.0,
+    timeout: Optional[float] = None,
     reconnect: bool = False,
     retry_delay: float = 10.0,
     yield_raw_events: bool = False,
@@ -345,7 +345,7 @@ def text_feed_stream(
     *,
     referrer: Optional[str] = None,
     token: Optional[str] = None,
-    timeout: Optional[float] = 300.0,
+    timeout: Optional[float] = None,
     reconnect: bool = False,
     retry_delay: float = 10.0,
     yield_raw_events: bool = False,

@@ -14,7 +14,7 @@ class ChatMixin:
         referrer: Optional[str] = None,
         token: Optional[str] = None,
         as_json: bool = False,
-        timeout: Optional[float] = 60.0,
+        timeout: Optional[float] = None,
     ) -> Any:
         if not isinstance(messages, list) or not messages:
             raise ValueError("messages must be a non-empty list of {role, content} dicts")
@@ -33,7 +33,7 @@ class ChatMixin:
             payload["token"] = token
         payload["safe"] = False
         url = f"{self.text_prompt_base}/{model}"
-        eff_timeout = timeout if timeout is not None else max(self.timeout, 10.0)
+        eff_timeout = self._resolve_timeout(timeout, 60.0)
         headers = {"Content-Type": "application/json"}
         resp = self.session.post(url, headers=headers, json=payload, timeout=eff_timeout)
         resp.raise_for_status()
@@ -58,7 +58,7 @@ class ChatMixin:
         private: Optional[bool] = None,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 300.0,
+        timeout: Optional[float] = None,
         yield_raw_events: bool = False,
     ) -> Iterator[str]:
         if not isinstance(messages, list) or not messages:
@@ -79,7 +79,7 @@ class ChatMixin:
             payload["token"] = token
         payload["safe"] = False
         url = f"{self.text_prompt_base}/{model}"
-        eff_timeout = timeout if timeout is not None else max(self.timeout, 60.0)
+        eff_timeout = self._resolve_timeout(timeout, 300.0)
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
@@ -131,7 +131,7 @@ class ChatMixin:
         referrer: Optional[str] = None,
         token: Optional[str] = None,
         as_json: bool = False,
-        timeout: Optional[float] = 60.0,
+        timeout: Optional[float] = None,
         max_rounds: int = 1,
     ) -> Any:
         if not isinstance(messages, list) or not messages:
@@ -142,7 +142,7 @@ class ChatMixin:
             seed = self._random_seed()
         url = f"{self.text_prompt_base}/{model}"
         headers = {"Content-Type": "application/json"}
-        eff_timeout = timeout if timeout is not None else max(self.timeout, 10.0)
+        eff_timeout = self._resolve_timeout(timeout, 60.0)
         history: List[Dict[str, Any]] = list(messages)
         rounds = 0
         while True:

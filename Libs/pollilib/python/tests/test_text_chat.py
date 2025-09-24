@@ -160,3 +160,29 @@ def test_generate_text_retry_backoff():
     rounded = [round(delay, 1) for delay in sleeps[:2]]
     assert rounded == [0.5, 0.6]
 
+
+def test_generate_text_uses_client_timeout_when_unspecified():
+    class TimeoutSession(FakeSession):
+        def get(self, url, **kw):
+            self.last_get = (url, kw)
+            return FakeResponse(text="ok")
+
+    session = TimeoutSession()
+    c = PolliClient(session=session, timeout=120.0, min_request_interval=0.0)
+    assert c.generate_text("hello") == "ok"
+    assert session.last_get[1]["timeout"] == 120.0
+
+
+def test_generate_text_respects_explicit_timeout_override():
+    class TimeoutSession(FakeSession):
+        def get(self, url, **kw):
+            self.last_get = (url, kw)
+            return FakeResponse(text="ok")
+
+    session = TimeoutSession()
+    c = PolliClient(session=session, timeout=200.0, min_request_interval=0.0)
+    assert c.generate_text("first") == "ok"
+    assert session.last_get[1]["timeout"] == 200.0
+    assert c.generate_text("second", timeout=45.0) == "ok"
+    assert session.last_get[1]["timeout"] == 45.0
+
