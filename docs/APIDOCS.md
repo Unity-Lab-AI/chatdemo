@@ -19,6 +19,7 @@ Click the links below to see examples in your browser:
 - [Pollinations.AI API Documentation](#pollinationsai-api-documentation)
   - [Quickstart](#quickstart)
   - [Summary / Navigation](#summary--navigation)
+  - [Request Pacing & Backoff ⏱️](#request-pacing--backoff-️)
   - [Generate Image API 🖼️](#generate-image-api-️)
     - [1. Text-To-Image (GET) 🖌️](#1-text-to-image-get-️)
     - [2. List Available Image Models 📜](#2-list-available-image-models-)
@@ -36,6 +37,16 @@ Click the links below to see examples in your browser:
   - [Authentication & Tiers 🔑](#authentication--tiers-)
   - [License 📜](#license-)
 ---
+
+# Request Pacing & Backoff ⏱️
+
+Pollinations enforces a minimum spacing between generation requests, especially on the Flower tier that powers this project. To avoid rate-limit walls:
+
+- Leave at least **3 seconds between successful calls** to the text, image, or audio generation endpoints.
+- When a request is rate-limited (HTTP 429/503) you can retry sooner, starting at **500 ms** and increasing by **100 ms** per attempt up to **4 seconds**.
+- PolliLib (our JavaScript and Python clients) now performs this pacing automatically: it queues generation requests, guarantees the 3-second post-success gap, and performs the short incremental backoff on retryable errors.
+
+If you are calling the HTTP APIs directly, adopt the same pattern to stay within the Flower tier guardrails and to minimize hard failures.
 
 # Generate Image API 🖼️
 

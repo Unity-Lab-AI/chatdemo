@@ -26,20 +26,22 @@ export const ImagesMixin = (Base) => class extends Base {
     if (token) params.set('token', token);
     const url = this._imagePromptUrl(String(prompt));
     const full = `${url}?${params}`;
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
-    try {
-      const resp = await this.fetch(full, { method: 'GET', signal: controller.signal });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      if (outPath) {
-        await streamToFile(resp, outPath, chunkSize);
-        return outPath;
+    const response = await this._rateLimitedRequest(async () => {
+      const controller = new AbortController();
+      const limit = timeoutMs ?? this.timeoutMs;
+      const t = setTimeout(() => controller.abort(), limit);
+      try {
+        return await this.fetch(full, { method: 'GET', signal: controller.signal });
+      } finally {
+        clearTimeout(t);
       }
-      const buf = await resp.arrayBuffer();
-      return Buffer.from(buf);
-    } finally {
-      clearTimeout(t);
+    });
+    if (outPath) {
+      await streamToFile(response, outPath, chunkSize);
+      return outPath;
     }
+    const buf = await response.arrayBuffer();
+    return Buffer.from(buf);
   }
 
   async save_image_timestamped(prompt, {
@@ -70,20 +72,22 @@ export const ImagesMixin = (Base) => class extends Base {
     const u = new URL(imageUrl);
     if (referrer) u.searchParams.set('referrer', referrer);
     if (token) u.searchParams.set('token', token);
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
-    try {
-      const resp = await this.fetch(u, { method: 'GET', signal: controller.signal });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      if (outPath) {
-        await streamToFile(resp, outPath, chunkSize);
-        return outPath;
+    const response = await this._rateLimitedRequest(async () => {
+      const controller = new AbortController();
+      const limit = timeoutMs ?? this.timeoutMs;
+      const t = setTimeout(() => controller.abort(), limit);
+      try {
+        return await this.fetch(u, { method: 'GET', signal: controller.signal });
+      } finally {
+        clearTimeout(t);
       }
-      const buf = await resp.arrayBuffer();
-      return Buffer.from(buf);
-    } finally {
-      clearTimeout(t);
+    });
+    if (outPath) {
+      await streamToFile(response, outPath, chunkSize);
+      return outPath;
     }
+    const buf = await response.arrayBuffer();
+    return Buffer.from(buf);
   }
 };
 

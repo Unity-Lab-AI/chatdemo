@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Dict, Iterable, List, Literal, Optional, TypedDict
+import threading
+import time
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, TypedDict
 import requests
 
 ModelType = Literal["text", "image"]
@@ -33,6 +35,11 @@ class BaseClient:
         text_prompt_base: str = "https://text.pollinations.ai",
         timeout: float = 10.0,
         session: Optional[requests.Session] = None,
+        min_request_interval: float = 3.0,
+        retry_initial_delay: float = 0.5,
+        retry_delay_step: float = 0.1,
+        retry_max_delay: float = 4.0,
+        sleep: Optional[Callable[[float], None]] = None,
     ) -> None:
         self.text_url = text_url
         self.image_url = image_url
@@ -40,6 +47,21 @@ class BaseClient:
         self.text_prompt_base = text_prompt_base
         self.timeout = timeout
         self.session = session or requests.Session()
+        self.min_request_interval = max(0.0, float(min_request_interval))
+        self.retry_initial_delay = max(0.0, float(retry_initial_delay))
+        self.retry_delay_step = max(0.0, float(retry_delay_step))
+        self.retry_max_delay = max(self.retry_initial_delay, float(retry_max_delay))
+        if self.retry_delay_step > 0 and self.retry_max_delay > 0 and self.retry_initial_delay > 0:
+            steps = int(max(0.0, (self.retry_max_delay - self.retry_initial_delay)) / self.retry_delay_step)
+            self._max_retry_attempts = steps + 1
+        elif self.retry_initial_delay > 0 and self.retry_max_delay > 0:
+            self._max_retry_attempts = 1
+        else:
+            self._max_retry_attempts = 0
+        self._sleep = sleep or time.sleep
+        self._last_success_ts = 0.0
+        self._request_lock = threading.Lock()
+        self._retryable_statuses = {429, 502, 503, 504}
 
     @lru_cache(maxsize=4)
     def list_models(self, kind: ModelType) -> List[Model]:
@@ -133,4 +155,30 @@ class BaseClient:
     def _text_prompt_url(self, prompt: str) -> str:
         from urllib.parse import quote
         return f"{self.text_prompt_base}/{quote(prompt)}"
+
+    def _retry_delay(self, attempt: int) -> float:
+        if attempt <= 0 or self.retry_initial_delay <= 0:
+            return 0.0
+        if attempt == 1 or self.retry_delay_step <= 0:
+            return min(self.retry_initial_delay, self.retry_max_delay)
+        delay = self.retry_initial_delay + (attempt - 1) * self.retry_delay_step
+        return min(delay, self.retry_max_delay)
+
+    def _can_retry(self, attempt: int) -> bool:
+        return attempt <= self._max_retry_attempts
+
+    def _wait_before_attempt(self, attempt: int) -> None:
+        now = time.monotonic()
+        if attempt == 0:
+            wait_for = (self._last_success_ts + self.min_request_interval) - now
+        else:
+            wait_for = self._retry_delay(attempt)
+        if wait_for > 0:
+            self._sleep(wait_for)
+
+    def _mark_success(self) -> None:
+        self._last_success_ts = time.monotonic()
+
+    def _should_retry_status(self, status: int) -> bool:
+        return status in self._retryable_statuses
 

@@ -35,15 +35,33 @@ class TextMixin:
             params["token"] = token
         url = self._text_prompt_url(prompt)
         eff_timeout = timeout if timeout is not None else max(self.timeout, 10.0)
-        resp = self.session.get(url, params=params, timeout=eff_timeout)
-        resp.raise_for_status()
+        attempt = 0
+        response = None
+        while True:
+            with self._request_lock:
+                self._wait_before_attempt(attempt)
+                resp = self.session.get(url, params=params, timeout=eff_timeout)
+                if self._should_retry_status(resp.status_code):
+                    if not self._can_retry(attempt + 1):
+                        resp.raise_for_status()
+                    resp.close()
+                    attempt += 1
+                    continue
+                try:
+                    resp.raise_for_status()
+                except Exception:
+                    resp.close()
+                    raise
+                self._mark_success()
+                response = resp
+                break
         if as_json:
             import json as _json
-            txt = resp.text
+
+            txt = response.text
             try:
                 return _json.loads(txt)
             except Exception:
                 return txt
-        else:
-            return resp.text
+        return response.text
 

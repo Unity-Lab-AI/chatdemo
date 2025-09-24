@@ -66,3 +66,37 @@ test('chat_completion_tools two-step', async () => {
   assert.equal(secondBody.safe, false);
 });
 
+test('generate_text enforces minimum 3s spacing between successes', async () => {
+  const seq = new SeqFetch([
+    new FakeResponse({ text: 'first' }),
+    new FakeResponse({ text: 'second' }),
+  ]);
+  const sleeps = [];
+  const c = new PolliClient({
+    fetch: seq.fetch.bind(seq),
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+  const first = await c.generate_text('hello');
+  assert.equal(first, 'first');
+  const second = await c.generate_text('world');
+  assert.equal(second, 'second');
+  assert.ok(sleeps.some((ms) => ms >= 2990), `expected >=2990ms wait, saw ${sleeps}`);
+});
+
+test('generate_text retries quickly when hitting rate limits', async () => {
+  const seq = new SeqFetch([
+    new FakeResponse({ status: 429, text: 'limit' }),
+    new FakeResponse({ status: 503, text: 'busy' }),
+    new FakeResponse({ text: 'ok' }),
+  ]);
+  const sleeps = [];
+  const c = new PolliClient({
+    fetch: seq.fetch.bind(seq),
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+  const result = await c.generate_text('retry please');
+  assert.equal(result, 'ok');
+  const rounded = sleeps.map((ms) => Math.round(ms));
+  assert.deepEqual(rounded.slice(0, 2), [500, 600]);
+});
+

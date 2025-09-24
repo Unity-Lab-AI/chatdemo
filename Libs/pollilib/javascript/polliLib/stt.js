@@ -17,14 +17,23 @@ export const STTMixin = (Base) => class extends Base {
     if (token) payload.token = token;
     payload.safe = false;
     const url = `${this.textPromptBase}/${provider}`;
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
-    try {
-      const resp = await this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const json = await resp.json();
-      return json?.choices?.[0]?.message?.content;
-    } finally { clearTimeout(t); }
+    const response = await this._rateLimitedRequest(async () => {
+      const controller = new AbortController();
+      const limit = timeoutMs ?? this.timeoutMs;
+      const t = setTimeout(() => controller.abort(), limit);
+      try {
+        return await this.fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(t);
+      }
+    });
+    const json = await response.json();
+    return json?.choices?.[0]?.message?.content;
   }
 };
 

@@ -6,7 +6,12 @@ const DEFAULTS = {
   imagePromptBase: "https://image.pollinations.ai/prompt",
   textPromptBase: "https://text.pollinations.ai",
   timeoutMs: 10000,
+  minRequestIntervalMs: 3000,
+  retryInitialDelayMs: 500,
+  retryDelayStepMs: 100,
+  retryMaxDelayMs: 4000,
 };
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
 
 export class BaseClient {
   constructor(opts = {}) {
@@ -18,6 +23,27 @@ export class BaseClient {
     this.fetch = opts.fetch || (typeof fetch !== "undefined" ? fetch.bind(globalThis) : null);
     if (!this.fetch) throw new Error("fetch is not available; provide opts.fetch");
     this._modelsCache = new Map(); // kind -> list
+    this.minRequestIntervalMs = Number.isFinite(opts.minRequestIntervalMs)
+      ? Math.max(0, opts.minRequestIntervalMs)
+      : DEFAULTS.minRequestIntervalMs;
+    this.retryInitialDelayMs = Number.isFinite(opts.retryInitialDelayMs)
+      ? Math.max(0, opts.retryInitialDelayMs)
+      : DEFAULTS.retryInitialDelayMs;
+    this.retryDelayStepMs = Number.isFinite(opts.retryDelayStepMs)
+      ? Math.max(0, opts.retryDelayStepMs)
+      : DEFAULTS.retryDelayStepMs;
+    this.retryMaxDelayMs = Number.isFinite(opts.retryMaxDelayMs)
+      ? Math.max(this.retryInitialDelayMs, opts.retryMaxDelayMs)
+      : DEFAULTS.retryMaxDelayMs;
+    const steps = this.retryDelayStepMs > 0
+      ? Math.floor(Math.max(0, this.retryMaxDelayMs - this.retryInitialDelayMs) / this.retryDelayStepMs)
+      : 0;
+    this._maxRetryAttempts = this.retryMaxDelayMs > 0 ? steps + 1 : 0;
+    this._sleepFn = typeof opts.sleep === "function"
+      ? opts.sleep
+      : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    this._lastSuccessAt = 0;
+    this._requestQueue = Promise.resolve();
   }
 
   async listModels(kind /* 'text' | 'image' */) {
@@ -108,6 +134,73 @@ export class BaseClient {
 
   _textPromptUrl(prompt) {
     return `${this.textPromptBase}/${encodeURIComponent(prompt)}`;
+  }
+
+  _retryDelayMs(attempt) {
+    if (attempt <= 0) return 0;
+    if (this.retryInitialDelayMs <= 0) return 0;
+    if (attempt === 1) return this.retryInitialDelayMs;
+    if (this.retryDelayStepMs <= 0) return Math.min(this.retryInitialDelayMs, this.retryMaxDelayMs);
+    const delay = this.retryInitialDelayMs + (attempt - 1) * this.retryDelayStepMs;
+    return Math.min(delay, this.retryMaxDelayMs);
+  }
+
+  async _sleep(ms) {
+    if (!(ms > 0)) return;
+    await this._sleepFn(ms);
+  }
+
+  _shouldRetryResponse(resp) {
+    return resp && RETRYABLE_STATUS.has(resp.status);
+  }
+
+  _isRetryableError(error) {
+    if (!error) return false;
+    if (error.retryable === true) return true;
+    if (typeof error.status === "number" && RETRYABLE_STATUS.has(error.status)) return true;
+    return false;
+  }
+
+  async _rateLimitedRequest(executor) {
+    const run = async () => {
+      let attempt = 0;
+      let lastError = null;
+      for (;;) {
+        if (attempt === 0) {
+          const waitMs = Math.max(0, this._lastSuccessAt + this.minRequestIntervalMs - Date.now());
+          if (waitMs > 0) await this._sleep(waitMs);
+        } else {
+          const delay = this._retryDelayMs(attempt);
+          if (delay > 0) await this._sleep(delay);
+        }
+        try {
+          const response = await executor(attempt);
+          if (this._shouldRetryResponse(response)) {
+            lastError = new Error(`HTTP ${response.status}`);
+            lastError.status = response.status;
+            try { response.body?.cancel?.(); } catch {}
+            attempt += 1;
+            if (attempt > this._maxRetryAttempts) throw lastError;
+            continue;
+          }
+          if (!response.ok) {
+            const err = new Error(`HTTP ${response.status}`);
+            err.status = response.status;
+            throw err;
+          }
+          this._lastSuccessAt = Date.now();
+          return response;
+        } catch (error) {
+          lastError = error;
+          if (!this._isRetryableError(error)) throw error;
+          attempt += 1;
+          if (attempt > this._maxRetryAttempts) throw lastError;
+        }
+      }
+    };
+    const next = this._requestQueue.then(run, run);
+    this._requestQueue = next.catch(() => {});
+    return next;
   }
 }
 
