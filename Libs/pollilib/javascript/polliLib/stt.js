@@ -1,7 +1,15 @@
 import fs from 'node:fs';
 
 export const STTMixin = (Base) => class extends Base {
-  async transcribe_audio(audioPath, { question = 'Transcribe this audio', model = 'openai-audio', provider = 'openai', referrer = null, token = null, timeoutMs = 120_000 } = {}) {
+  async transcribe_audio(audioPath, options = {}) {
+    const {
+      question = 'Transcribe this audio',
+      model = 'openai-audio',
+      provider = 'openai',
+      referrer = null,
+      token = null,
+      timeoutMs,
+    } = options;
     if (!fs.existsSync(audioPath)) throw new Error(`File not found: ${audioPath}`);
     const ext = String(audioPath).split('.').pop().toLowerCase();
     if (!['mp3','wav'].includes(ext)) return null;
@@ -19,7 +27,7 @@ export const STTMixin = (Base) => class extends Base {
     const url = `${this.textPromptBase}/${provider}`;
     const response = await this._rateLimitedRequest(async () => {
       const controller = new AbortController();
-      const limit = timeoutMs ?? this.timeoutMs;
+      const limit = this._resolveTimeout(timeoutMs, 120_000);
       const t = setTimeout(() => controller.abort(), limit);
       try {
         return await this.fetch(url, {

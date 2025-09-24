@@ -5,7 +5,7 @@ const DEFAULTS = {
   imageUrl: "https://image.pollinations.ai/models",
   imagePromptBase: "https://image.pollinations.ai/prompt",
   textPromptBase: "https://text.pollinations.ai",
-  timeoutMs: 10000,
+  timeoutMs: 60000,
   minRequestIntervalMs: 3000,
   retryInitialDelayMs: 500,
   retryDelayStepMs: 100,
@@ -159,6 +159,15 @@ export class BaseClient {
     if (error.retryable === true) return true;
     if (typeof error.status === "number" && RETRYABLE_STATUS.has(error.status)) return true;
     return false;
+  }
+
+  _resolveTimeout(timeoutMs, fallbackMs = null) {
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) return timeoutMs;
+    const base = Number.isFinite(this.timeoutMs) && this.timeoutMs > 0 ? this.timeoutMs : null;
+    if (base != null) return base;
+    const fallback = Number.isFinite(fallbackMs) && fallbackMs > 0 ? fallbackMs : null;
+    if (fallback != null) return fallback;
+    return 60_000;
   }
 
   async _rateLimitedRequest(executor) {

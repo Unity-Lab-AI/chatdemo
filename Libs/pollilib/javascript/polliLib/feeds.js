@@ -1,12 +1,23 @@
 export const FeedsMixin = (Base) => class extends Base {
-  async *image_feed_stream({ referrer = null, token = null, timeoutMs = 300_000, reconnect = false, retryDelayMs = 10_000, yieldRawEvents = false, includeBytes = false, includeDataUrl = false } = {}) {
+  async *image_feed_stream(options = {}) {
+    const {
+      referrer = null,
+      token = null,
+      timeoutMs,
+      reconnect = false,
+      retryDelayMs = 10_000,
+      yieldRawEvents = false,
+      includeBytes = false,
+      includeDataUrl = false,
+    } = options;
     const feedUrl = new URL('https://image.pollinations.ai/feed');
     if (referrer) feedUrl.searchParams.set('referrer', referrer);
     if (token) feedUrl.searchParams.set('token', token);
+    const limit = this._resolveTimeout(timeoutMs, 300_000);
 
     const connect = async function* (self) {
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), timeoutMs || self.timeoutMs);
+      const t = setTimeout(() => controller.abort(), limit);
       try {
         const resp = await self.fetch(feedUrl, { method: 'GET', headers: { 'Accept': 'text/event-stream' }, signal: controller.signal });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -51,13 +62,22 @@ export const FeedsMixin = (Base) => class extends Base {
     }
   }
 
-  async *text_feed_stream({ referrer = null, token = null, timeoutMs = 300_000, reconnect = false, retryDelayMs = 10_000, yieldRawEvents = false } = {}) {
+  async *text_feed_stream(options = {}) {
+    const {
+      referrer = null,
+      token = null,
+      timeoutMs,
+      reconnect = false,
+      retryDelayMs = 10_000,
+      yieldRawEvents = false,
+    } = options;
     const feedUrl = new URL('https://text.pollinations.ai/feed');
     if (referrer) feedUrl.searchParams.set('referrer', referrer);
     if (token) feedUrl.searchParams.set('token', token);
+    const limit = this._resolveTimeout(timeoutMs, 300_000);
     const connect = async function* (self) {
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), timeoutMs || self.timeoutMs);
+      const t = setTimeout(() => controller.abort(), limit);
       try {
         const resp = await self.fetch(feedUrl, { method: 'GET', headers: { 'Accept': 'text/event-stream' }, signal: controller.signal });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

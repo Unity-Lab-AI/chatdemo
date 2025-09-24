@@ -9,7 +9,7 @@ class FeedsMixin:
         *,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 300.0,
+        timeout: Optional[float] = None,
         reconnect: bool = False,
         retry_delay: float = 10.0,
         yield_raw_events: bool = False,
@@ -24,6 +24,8 @@ class FeedsMixin:
         """
         feed_url = "https://image.pollinations.ai/feed"
 
+        eff_timeout = self._resolve_timeout(timeout, 300.0)
+
         def _connect() -> Iterator[Any]:
             params: Dict[str, Any] = {}
             if referrer:
@@ -31,7 +33,7 @@ class FeedsMixin:
             if token:
                 params["token"] = token
             headers = {"Accept": "text/event-stream"}
-            with self.session.get(feed_url, params=params, headers=headers, stream=True, timeout=timeout or self.timeout) as resp:
+            with self.session.get(feed_url, params=params, headers=headers, stream=True, timeout=eff_timeout) as resp:
                 resp.raise_for_status()
                 for raw in resp.iter_lines(decode_unicode=True):
                     if not raw:
@@ -58,7 +60,7 @@ class FeedsMixin:
                         if include_data_url or include_bytes:
                             img_url = ev.get("imageURL") or ev.get("image_url")
                             if img_url:
-                                r = self.session.get(img_url, timeout=timeout or self.timeout)
+                                r = self.session.get(img_url, timeout=eff_timeout)
                                 r.raise_for_status()
                                 content = r.content
                                 if include_data_url:
@@ -89,12 +91,14 @@ class FeedsMixin:
         *,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 300.0,
+        timeout: Optional[float] = None,
         reconnect: bool = False,
         retry_delay: float = 10.0,
         yield_raw_events: bool = False,
     ) -> Iterator[Any]:
         feed_url = "https://text.pollinations.ai/feed"
+
+        eff_timeout = self._resolve_timeout(timeout, 300.0)
 
         def _connect() -> Iterator[Any]:
             params: Dict[str, Any] = {}
@@ -103,7 +107,7 @@ class FeedsMixin:
             if token:
                 params["token"] = token
             headers = {"Accept": "text/event-stream"}
-            with self.session.get(feed_url, params=params, headers=headers, stream=True, timeout=timeout or self.timeout) as resp:
+            with self.session.get(feed_url, params=params, headers=headers, stream=True, timeout=eff_timeout) as resp:
                 resp.raise_for_status()
                 for raw in resp.iter_lines(decode_unicode=True):
                     if not raw:

@@ -16,7 +16,7 @@ class ImageMixin:
         image: Optional[str] = None,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 300.0,
+        timeout: Optional[float] = None,
         out_path: Optional[str] = None,
         chunk_size: int = 1024 * 64,
     ) -> bytes | str:
@@ -44,7 +44,7 @@ class ImageMixin:
             params["token"] = token
 
         url = self._image_prompt_url(prompt)
-        eff_timeout = timeout if timeout is not None else max(self.timeout, 60.0)
+        eff_timeout = self._resolve_timeout(timeout, 300.0)
         attempt = 0
         stream = bool(out_path)
         response = None
@@ -88,7 +88,7 @@ class ImageMixin:
         image: Optional[str] = None,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 300.0,
+        timeout: Optional[float] = None,
         images_dir: Optional[str] = None,
         filename_prefix: str = "",
         filename_suffix: str = "",
@@ -123,7 +123,7 @@ class ImageMixin:
         *,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 120.0,
+        timeout: Optional[float] = None,
         out_path: Optional[str] = None,
         chunk_size: int = 1024 * 64,
     ) -> bytes | str:
@@ -138,7 +138,8 @@ class ImageMixin:
         while True:
             with self._request_lock:
                 self._wait_before_attempt(attempt)
-                resp = self.session.get(image_url, params=params, timeout=timeout or self.timeout, stream=stream)
+                eff_timeout = self._resolve_timeout(timeout, 120.0)
+                resp = self.session.get(image_url, params=params, timeout=eff_timeout, stream=stream)
                 if self._should_retry_status(resp.status_code):
                     if not self._can_retry(attempt + 1):
                         resp.raise_for_status()

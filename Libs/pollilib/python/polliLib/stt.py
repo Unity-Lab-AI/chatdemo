@@ -13,7 +13,7 @@ class STTMixin:
         provider: str = "openai",
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 120.0,
+        timeout: Optional[float] = None,
     ) -> Optional[str]:
         import os, base64
         if not os.path.exists(audio_path):
@@ -44,10 +44,11 @@ class STTMixin:
         headers = {"Content-Type": "application/json"}
         attempt = 0
         response = None
+        eff_timeout = self._resolve_timeout(timeout, 120.0)
         while True:
             with self._request_lock:
                 self._wait_before_attempt(attempt)
-                resp = self.session.post(url, headers=headers, json=payload, timeout=timeout or self.timeout)
+                resp = self.session.post(url, headers=headers, json=payload, timeout=eff_timeout)
                 if self._should_retry_status(resp.status_code):
                     if not self._can_retry(attempt + 1):
                         resp.raise_for_status()

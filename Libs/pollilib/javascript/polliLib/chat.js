@@ -1,6 +1,15 @@
 export const ChatMixin = (Base) => class extends Base {
-  async chat_completion(messages, { model = 'openai', seed = null, private_: priv = undefined, referrer = null, token = null, asJson = false, timeoutMs = 60_000 } = {}) {
+  async chat_completion(messages, options = {}) {
     if (!Array.isArray(messages) || messages.length === 0) throw new Error('messages must be a non-empty list');
+    const {
+      model = 'openai',
+      private_: priv = undefined,
+      referrer = null,
+      token = null,
+      asJson = false,
+      timeoutMs,
+    } = options;
+    let seed = options.seed ?? null;
     if (seed == null) seed = this._randomSeed();
     const payload = { model, messages, seed };
     if (priv !== undefined) payload.private = !!priv;
@@ -9,7 +18,7 @@ export const ChatMixin = (Base) => class extends Base {
     payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
+    const t = setTimeout(() => controller.abort(), this._resolveTimeout(timeoutMs, 60_000));
     try {
       const resp = await this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -19,8 +28,17 @@ export const ChatMixin = (Base) => class extends Base {
     } finally { clearTimeout(t); }
   }
 
-  async *chat_completion_stream(messages, { model = 'openai', seed = null, private_: priv = undefined, referrer = null, token = null, timeoutMs = 300_000, yieldRawEvents = false } = {}) {
+  async *chat_completion_stream(messages, options = {}) {
     if (!Array.isArray(messages) || messages.length === 0) throw new Error('messages must be a non-empty list');
+    const {
+      model = 'openai',
+      private_: priv = undefined,
+      referrer = null,
+      token = null,
+      timeoutMs,
+      yieldRawEvents = false,
+    } = options;
+    let seed = options.seed ?? null;
     if (seed == null) seed = this._randomSeed();
     const payload = { model, messages, seed, stream: true };
     if (priv !== undefined) payload.private = !!priv;
@@ -29,7 +47,7 @@ export const ChatMixin = (Base) => class extends Base {
     payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
+    const t = setTimeout(() => controller.abort(), this._resolveTimeout(timeoutMs, 300_000));
     try {
       const resp = await this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' }, body: JSON.stringify(payload), signal: controller.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -47,13 +65,26 @@ export const ChatMixin = (Base) => class extends Base {
     } finally { clearTimeout(t); }
   }
 
-  async chat_completion_tools(messages, { tools, functions = {}, tool_choice = 'auto', model = 'openai', seed = null, private_: priv = undefined, referrer = null, token = null, asJson = false, timeoutMs = 60_000, max_rounds = 1 } = {}) {
+  async chat_completion_tools(messages, options = {}) {
     if (!Array.isArray(messages) || messages.length === 0) throw new Error('messages must be a non-empty list');
+    const {
+      tools,
+      functions = {},
+      tool_choice = 'auto',
+      model = 'openai',
+      private_: priv = undefined,
+      referrer = null,
+      token = null,
+      asJson = false,
+      timeoutMs,
+      max_rounds = 1,
+    } = options;
     if (!Array.isArray(tools) || tools.length === 0) throw new Error('tools must be a non-empty list');
+    let seed = options.seed ?? null;
     if (seed == null) seed = this._randomSeed();
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
+    const t = setTimeout(() => controller.abort(), this._resolveTimeout(timeoutMs, 60_000));
     try {
       const history = [...messages];
       let rounds = 0;

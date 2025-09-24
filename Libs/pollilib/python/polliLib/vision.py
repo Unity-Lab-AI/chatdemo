@@ -13,7 +13,7 @@ class VisionMixin:
         max_tokens: Optional[int] = 500,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 60.0,
+        timeout: Optional[float] = None,
         as_json: bool = False,
     ) -> Any:
         payload: Dict[str, Any] = {
@@ -37,7 +37,8 @@ class VisionMixin:
         payload["safe"] = False
         url = f"{self.text_prompt_base}/{model}"
         headers = {"Content-Type": "application/json"}
-        resp = self.session.post(url, headers=headers, json=payload, timeout=timeout or self.timeout)
+        eff_timeout = self._resolve_timeout(timeout, 60.0)
+        resp = self.session.post(url, headers=headers, json=payload, timeout=eff_timeout)
         resp.raise_for_status()
         data = resp.json()
         if as_json:
@@ -53,7 +54,7 @@ class VisionMixin:
         max_tokens: Optional[int] = 500,
         referrer: Optional[str] = None,
         token: Optional[str] = None,
-        timeout: Optional[float] = 60.0,
+        timeout: Optional[float] = None,
         as_json: bool = False,
     ) -> Any:
         import os, base64
@@ -86,7 +87,8 @@ class VisionMixin:
         payload["safe"] = False
         url = f"{self.text_prompt_base}/{model}"
         headers = {"Content-Type": "application/json"}
-        resp = self.session.post(url, headers=headers, json=payload, timeout=timeout or self.timeout)
+        eff_timeout = self._resolve_timeout(timeout, 60.0)
+        resp = self.session.post(url, headers=headers, json=payload, timeout=eff_timeout)
         resp.raise_for_status()
         data = resp.json()
         if as_json:

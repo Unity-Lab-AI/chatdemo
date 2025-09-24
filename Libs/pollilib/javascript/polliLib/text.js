@@ -1,6 +1,15 @@
 export const TextMixin = (Base) => class extends Base {
-  async generate_text(prompt, { model = 'openai', seed = null, system = null, referrer = null, token = null, asJson = false, timeoutMs = 60_000 } = {}) {
+  async generate_text(prompt, options = {}) {
     if (!prompt || !String(prompt).trim()) throw new Error('prompt must be a non-empty string');
+    const {
+      model = 'openai',
+      system = null,
+      referrer = null,
+      token = null,
+      asJson = false,
+      timeoutMs,
+    } = options;
+    let seed = options.seed ?? null;
     if (seed == null) seed = this._randomSeed();
     const url = new URL(this._textPromptUrl(String(prompt)));
     url.searchParams.set('model', model);
@@ -12,7 +21,7 @@ export const TextMixin = (Base) => class extends Base {
     if (token) url.searchParams.set('token', token);
     const response = await this._rateLimitedRequest(async () => {
       const controller = new AbortController();
-      const limit = timeoutMs ?? this.timeoutMs;
+      const limit = this._resolveTimeout(timeoutMs, 60_000);
       const t = setTimeout(() => controller.abort(), limit);
       try {
         return await this.fetch(url, { method: 'GET', signal: controller.signal });
