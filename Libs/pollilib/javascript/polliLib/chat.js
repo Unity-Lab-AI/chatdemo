@@ -6,6 +6,7 @@ export const ChatMixin = (Base) => class extends Base {
     if (priv !== undefined) payload.private = !!priv;
     if (referrer) payload.referrer = referrer;
     if (token) payload.token = token;
+    payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
@@ -25,6 +26,7 @@ export const ChatMixin = (Base) => class extends Base {
     if (priv !== undefined) payload.private = !!priv;
     if (referrer) payload.referrer = referrer;
     if (token) payload.token = token;
+    payload.safe = false;
     const url = `${this.textPromptBase}/${model}`;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);
@@ -60,6 +62,7 @@ export const ChatMixin = (Base) => class extends Base {
         if (priv !== undefined) payload.private = !!priv;
         if (referrer) payload.referrer = referrer;
         if (token) payload.token = token;
+        payload.safe = false;
         const resp = await this.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();

@@ -12,8 +12,10 @@ test('generate_image streams to file and fetch_image returns bytes', async (t) =
   const seq = new SeqFetch([
     new FakeResponse({ content: Buffer.from('abc') }),
   ]);
-  // For streaming path: provide body stream lines as bytes
+  // For streaming path: provide body stream lines as bytes and capture calls
+  const calls = [];
   seq.fetch = async (url, opts = {}) => {
+    calls.push({ url: String(url), opts });
     if (opts?.signal && opts.method === 'GET' && String(url).includes('/prompt/')) {
       // Simulate streaming chunks
       const lines = ['a', 'b', 'c'];
@@ -24,6 +26,9 @@ test('generate_image streams to file and fetch_image returns bytes', async (t) =
   const c = new PolliClient({ fetch: seq.fetch.bind(seq) });
   const saved = await c.generate_image('test', { outPath });
   assert.equal(saved, outPath);
+  const promptCall = calls.find((call) => String(call.url).includes('/prompt/'));
+  const promptUrl = new URL(promptCall.url);
+  assert.equal(promptUrl.searchParams.get('safe'), 'false');
   const data = await fs.promises.readFile(outPath);
   // Our fake stream writes chunks with newlines per line; normalize
   assert.equal(data.toString('utf-8').replace(/\n/g, ''), 'abc');

@@ -5,6 +5,7 @@ export const TextMixin = (Base) => class extends Base {
     const url = new URL(this._textPromptUrl(String(prompt)));
     url.searchParams.set('model', model);
     url.searchParams.set('seed', String(seed));
+    url.searchParams.set('safe', 'false');
     if (asJson) url.searchParams.set('json', 'true');
     if (system) url.searchParams.set('system', system);
     if (referrer) url.searchParams.set('referrer', referrer);

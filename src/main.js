@@ -1015,10 +1015,10 @@ async function fetchTtsAudioUrl(text, voice) {
   const base = 'https://text.pollinations.ai';
   const header = 'Speak only the following text, exactly as it is written:';
   const attempts = [
-    { withHeader: true, safeFalse: true, system: true },
-    { withHeader: true, safeFalse: false, system: true },
-    { withHeader: true, safeFalse: false, system: false },
-    { withHeader: false, safeFalse: false, system: false },
+    { withHeader: true, system: true },
+    { withHeader: true, system: false },
+    { withHeader: false, system: true },
+    { withHeader: false, system: false },
   ];
   for (const a of attempts) {
     const combined = a.withHeader ? `${header}\n${text}` : text;
@@ -1029,7 +1029,7 @@ async function fetchTtsAudioUrl(text, voice) {
     u.searchParams.set('top_p', '0');
     u.searchParams.set('presence_penalty', '0');
     u.searchParams.set('frequency_penalty', '0');
-    if (a.safeFalse) u.searchParams.set('safe', 'false');
+    u.searchParams.set('safe', 'false');
     if (a.system) u.searchParams.set('system', 'Speak exactly the provided text verbatim. Do not add, rephrase, or omit any words. Read only the content after the line break.');
     if (ref) u.searchParams.set('referrer', ref);
     // cache-buster to avoid any gateway caches returning truncated audio

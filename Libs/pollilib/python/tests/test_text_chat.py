@@ -27,6 +27,7 @@ def test_generate_text_as_json_and_params():
     url, kw = fs.last_get
     assert kw["params"]["referrer"] == "app"
     assert kw["params"]["token"] == "tok"
+    assert kw["params"]["safe"] == "false"
 
 
 def test_chat_completion_payload_and_extract():
@@ -36,6 +37,7 @@ def test_chat_completion_payload_and_extract():
     assert resp == "ok"
     url, headers, payload, kw = fs.last_post
     assert payload["referrer"] == "r" and payload["token"] == "t"
+    assert payload["safe"] is False
 
 
 def test_chat_completion_stream_sse():
@@ -85,10 +87,12 @@ def test_chat_completion_tools_one_round():
         def __init__(self):
             super().__init__()
             self.count = 0
+            self.posts = []
 
         def post(self, url, headers=None, json=None, **kw):
             self.count += 1
             self.last_post = (url, headers or {}, json or {}, kw)
+            self.posts.append(self.last_post)
             return FakeResponse(json_data=(first_data if self.count == 1 else second_data))
 
     fs = SeqSession()
@@ -110,4 +114,6 @@ def test_chat_completion_tools_one_round():
     msg = [{"role": "user", "content": "What's weather?"}]
     out = c.chat_completion_tools(msg, tools=tools, functions={"get_current_weather": get_current_weather})
     assert out == "Weather is Cloudy"
+    assert len(fs.posts) == 2
+    assert all(post[2].get("safe") is False for post in fs.posts)
 

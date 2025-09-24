@@ -23,6 +23,7 @@ class TextMixin:
         params: Dict[str, Any] = {
             "model": model,
             "seed": seed,
+            "safe": "false",
         }
         if as_json:
             params["json"] = "true"

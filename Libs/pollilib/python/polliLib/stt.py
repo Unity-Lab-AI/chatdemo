@@ -39,6 +39,7 @@ class STTMixin:
             payload["referrer"] = referrer
         if token:
             payload["token"] = token
+        payload["safe"] = False
         url = f"{self.text_prompt_base}/{provider}"
         headers = {"Content-Type": "application/json"}
         resp = self.session.post(url, headers=headers, json=payload, timeout=timeout or self.timeout)

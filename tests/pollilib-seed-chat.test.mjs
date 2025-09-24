@@ -54,6 +54,7 @@ export async function run() {
   assert.equal(payload.referrer, 'https://www.unityailab.com');
   assert.equal(payload.model, 'unity');
   assert.deepEqual(payload.messages, messages);
+  assert.equal(payload.safe, false);
 }
 
 

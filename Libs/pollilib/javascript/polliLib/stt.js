@@ -15,6 +15,7 @@ export const STTMixin = (Base) => class extends Base {
     };
     if (referrer) payload.referrer = referrer;
     if (token) payload.token = token;
+    payload.safe = false;
     const url = `${this.textPromptBase}/${provider}`;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs || this.timeoutMs);

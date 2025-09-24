@@ -31,6 +31,7 @@ class ChatMixin:
             payload["referrer"] = referrer
         if token:
             payload["token"] = token
+        payload["safe"] = False
         url = f"{self.text_prompt_base}/{model}"
         eff_timeout = timeout if timeout is not None else max(self.timeout, 10.0)
         headers = {"Content-Type": "application/json"}
@@ -76,6 +77,7 @@ class ChatMixin:
             payload["referrer"] = referrer
         if token:
             payload["token"] = token
+        payload["safe"] = False
         url = f"{self.text_prompt_base}/{model}"
         eff_timeout = timeout if timeout is not None else max(self.timeout, 60.0)
         headers = {
@@ -157,6 +159,7 @@ class ChatMixin:
                 payload["referrer"] = referrer
             if token:
                 payload["token"] = token
+            payload["safe"] = False
             resp = self.session.post(url, headers=headers, json=payload, timeout=eff_timeout)
             resp.raise_for_status()
             data = resp.json()

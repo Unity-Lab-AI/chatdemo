@@ -48,6 +48,7 @@ export class PolliClient {
   async generate_text(prompt, { model = 'openai', system = null, referrer = null, asJson = false, timeoutMs = this.timeoutMs } = {}) {
     const u = new URL(`${this.textPromptBase}/${encodeURIComponent(String(prompt))}`);
     u.searchParams.set('model', model);
+    u.searchParams.set('safe', 'false');
     if (system) u.searchParams.set('system', system);
     if (referrer) u.searchParams.set('referrer', referrer);
     const controller = new AbortController();
@@ -65,7 +66,7 @@ export class PolliClient {
 
   async chat_completion(messages, { model = 'openai', referrer = null, asJson = true, timeoutMs = this.timeoutMs, ...rest } = {}) {
     const url = `${this.textPromptBase}/openai`;
-    const payload = { model, messages, ...(referrer ? { referrer } : {}), ...rest };
+    const payload = { model, messages, ...(referrer ? { referrer } : {}), ...rest, safe: false };
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -84,7 +85,7 @@ export class PolliClient {
 
   async chat_completion_tools(messages, { tools, tool_choice = 'auto', model = 'openai', referrer = null, asJson = true, timeoutMs = this.timeoutMs, ...rest } = {}) {
     const url = `${this.textPromptBase}/openai`;
-    const payload = { model, messages, tools, tool_choice, ...(referrer ? { referrer } : {}), ...rest };
+    const payload = { model, messages, tools, tool_choice, ...(referrer ? { referrer } : {}), ...rest, safe: false };
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -100,6 +101,7 @@ export class PolliClient {
     u.searchParams.set('width', String(width));
     u.searchParams.set('height', String(height));
     u.searchParams.set('model', model);
+    u.searchParams.set('safe', 'false');
     if (nologo) u.searchParams.set('nologo', 'true');
     if (seed != null) u.searchParams.set('seed', String(seed));
     if (referrer) u.searchParams.set('referrer', referrer);
@@ -173,6 +175,7 @@ export async function chat(payload, client) {
     ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
     ...rest,
   };
+  baseBody.safe = false;
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), c.timeoutMs);
