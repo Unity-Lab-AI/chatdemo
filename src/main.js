@@ -2153,7 +2153,9 @@ async function loadModels() {
   setStatus('Loading models…');
   try {
     const catalog = await textModels(client);
-    const models = normalizeTextCatalog(catalog);
+    const modelsRaw = normalizeTextCatalog(catalog);
+    // Exclude voice-only TTS model from chat model selector to avoid HTTP 400 on chat
+    const models = (modelsRaw || []).filter(m => !matchesModelIdentifier('openai-audio', m));
     if (!Array.isArray(models) || !models.length) {
       throw new Error('Received an empty model list');
     }
