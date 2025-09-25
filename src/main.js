@@ -241,6 +241,32 @@ function renderDebugPanel(extra = {}) {
   const ua = navigator.userAgent;
   const url = location.href;
   const jsonMode = false;
+  // TTS diagnostics
+  const tts = (() => {
+    try {
+      const job = currentTtsJob || null;
+      if (!job) return { active: false, queue: ttsQueue.length, cooldownMs: ttsFetchCooldownMs };
+      // compute contiguous ready ahead
+      let readyAhead = 0;
+      for (let i = job.playIndex; i < job.groups.length; i += 1) {
+        const r = job.results[i];
+        if (typeof r === 'string' && r) { readyAhead += 1; }
+        else if (r === TTS_CHUNK_ERROR) { readyAhead += 1; }
+        else break;
+      }
+      return {
+        active: true,
+        chunks: job.groups.length,
+        inflight: job.inflight,
+        nextFetchIndex: job.nextFetchIndex,
+        playIndex: job.playIndex,
+        readyAhead,
+        cooldownMs: ttsFetchCooldownMs,
+        queue: ttsQueue.length,
+      };
+    } catch { return { active: false, queue: ttsQueue.length, cooldownMs: ttsFetchCooldownMs }; }
+  })();
+
   const payload = {
     version: rev,
     referrer: ref,
@@ -253,6 +279,7 @@ function renderDebugPanel(extra = {}) {
     serviceWorker: sw,
     conversationLength: convoLen,
     lastRequests: recent,
+    tts,
     ...extra,
   };
   if (!showPayloads) {
@@ -300,12 +327,27 @@ async function sendPromptStreaming(prompt) {
     state.activeModel = { id: pinnedId, endpoint, info: selectedModel };
     if (!state.pinnedModelId) state.pinnedModelId = pinnedId;
     let streamed = '';
+    let rafScheduled = false;
+    const scheduleRender = () => {
+      if (rafScheduled) return;
+      rafScheduled = true;
+      const run = () => {
+        rafScheduled = false;
+        renderMessages();
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(run);
+      } else {
+        setTimeout(run, 50);
+      }
+    };
     try {
-      for await (const chunk of chatStream({ model: pinnedId, endpoint, messages: state.conversation, seed: generateSeed() }, client)) {
+      // Do not include 'seed' for text chat; OpenAI route rejects it
+      for await (const chunk of chatStream({ model: pinnedId, endpoint, messages: state.conversation }, client)) {
         if (typeof chunk === 'string' && chunk) {
           streamed += chunk;
           assistantMsg.content = streamed;
-          renderMessages();
+          scheduleRender();
         }
       }
     } catch (e) {
@@ -316,6 +358,7 @@ async function sendPromptStreaming(prompt) {
     }
     if (streamed.trim()) {
       state.conversation.push({ role: 'assistant', content: streamed });
+      renderMessages();
       if (state.voicePlayback && els.voiceSelect.value) {
         void speakMessage(assistantMsg, { autoplay: true });
       }
@@ -865,6 +908,8 @@ const TTS_FETCH_SLOW_THRESHOLD_MS = 4200;
 const TTS_FETCH_VERY_SLOW_THRESHOLD_MS = 6500;
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRhYAAABXQVZFZm10IBIAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
 const TTS_CHUNK_MAX_CHARS = 250;
+const TTS_FIRST_CHUNK_MAX_CHARS = 160;
+const TTS_SECOND_CHUNK_MAX_CHARS = 220;
 // TTS fetch timeouts: scale with chunk size to avoid long hangs
 const TTS_FETCH_TIMEOUT_MIN_MS = 10000;   // 10s
 const TTS_FETCH_TIMEOUT_MAX_MS = 40000;   // 40s cap
@@ -1038,7 +1083,10 @@ function buildTtsChunks(text, { maxChars = TTS_CHUNK_MAX_CHARS } = {}) {
     while (i < sents.length) {
       const next = sents[i];
       const sep = chunk ? ' ' : '';
-      if ((chunk.length + sep.length + next.length) <= maxChars) {
+      const cap = chunks.length === 0
+        ? TTS_FIRST_CHUNK_MAX_CHARS
+        : (chunks.length === 1 ? TTS_SECOND_CHUNK_MAX_CHARS : maxChars);
+      if ((chunk.length + sep.length + next.length) <= cap) {
         chunk += sep + next;
         i += 1;
         added += 1;
@@ -1049,9 +1097,12 @@ function buildTtsChunks(text, { maxChars = TTS_CHUNK_MAX_CHARS } = {}) {
     if (!chunk) {
       // Single long sentence; split within maxChars using last whitespace
       const long = sents[i];
-      const slice = long.slice(0, maxChars);
+      const cap = chunks.length === 0
+        ? TTS_FIRST_CHUNK_MAX_CHARS
+        : (chunks.length === 1 ? TTS_SECOND_CHUNK_MAX_CHARS : maxChars);
+      const slice = long.slice(0, cap);
       const cut = Math.max(slice.lastIndexOf(' '), slice.lastIndexOf(','), slice.lastIndexOf(';'));
-      const end = cut > 40 ? cut : maxChars; // avoid cutting too early
+      const end = cut > 40 ? cut : cap; // avoid cutting too early
       chunk = slice.slice(0, end).trim();
       sents[i] = long.slice(end).trim(); // keep remainder as a sentence
       if (!sents[i]) i += 1;
@@ -1705,7 +1756,6 @@ async function handleChatResponse(initialResponse, model, endpoint) {
           messages: state.conversation,
           ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
           response_format: { type: 'json_object' },
-          seed: generateSeed(),
         },
         client,
       );
@@ -1763,7 +1813,7 @@ async function handleChatResponse(initialResponse, model, endpoint) {
         if (attemptedJson && !jsonFallbackUsed) {
           try {
             const salvageMessages = state.conversation.slice(0, -1); // drop the empty assistant turn
-            const retryResp = await chat({ model: model.id, endpoint, messages: salvageMessages, seed: generateSeed() }, client);
+            const retryResp = await chat({ model: model.id, endpoint, messages: salvageMessages }, client);
             const retryMsg = retryResp?.choices?.[0]?.message;
             const retryContent = normalizeContent(retryMsg?.content);
             if (retryContent && retryContent.trim()) {
@@ -2220,7 +2270,6 @@ async function requestChatCompletion(model, endpoints) {
             messages: state.conversation,
             ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
             response_format: { type: 'json_object' },
-            seed: generateSeed(),
           },
           client,
         );

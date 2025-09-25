@@ -10,8 +10,32 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-tests:
-    name: Run Tests
+  tests-core:
+    name: Build Tests (core)
+    runs-on: ubuntu-latest
+    env:
+      POLLI_TOKEN: ${{ secrets.POLLI_TOKEN || secrets.VITE_POLLI_TOKEN || secrets.POLLINATIONS_TOKEN || secrets.VITE_POLLINATIONS_TOKEN }}
+      VITE_POLLI_TOKEN: ${{ secrets.VITE_POLLI_TOKEN || secrets.POLLI_TOKEN || secrets.VITE_POLLINATIONS_TOKEN || secrets.POLLINATIONS_TOKEN }}
+      POLLINATIONS_TOKEN: ${{ secrets.POLLINATIONS_TOKEN || secrets.POLLI_TOKEN || secrets.VITE_POLLINATIONS_TOKEN || secrets.VITE_POLLI_TOKEN }}
+      VITE_POLLINATIONS_TOKEN: ${{ secrets.VITE_POLLINATIONS_TOKEN || secrets.POLLINATIONS_TOKEN || secrets.VITE_POLLI_TOKEN || secrets.POLLI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm install
+      - name: Build Tests (core suite)
+        run: node tools/run-tests.mjs --pattern "^(?!all-models-(live|deep)|tts-live|models-export).*\\.test\\.mjs$" --output reports/test-results-core.json
+      - name: Upload core test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-tests-core
+          path: reports/test-results-core.json
+          if-no-files-found: warn
+
+  tests-live:
+    name: Build Tests (live models)
     runs-on: ubuntu-latest
     continue-on-error: true
     env:
@@ -20,45 +44,87 @@ jobs:
       POLLINATIONS_TOKEN: ${{ secrets.POLLINATIONS_TOKEN || secrets.POLLI_TOKEN || secrets.VITE_POLLINATIONS_TOKEN || secrets.VITE_POLLI_TOKEN }}
       VITE_POLLINATIONS_TOKEN: ${{ secrets.VITE_POLLINATIONS_TOKEN || secrets.POLLINATIONS_TOKEN || secrets.VITE_POLLI_TOKEN || secrets.POLLI_TOKEN }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run Tests
-        run: npm test
-
-      - name: Upload test report
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm install
+      - name: Build Tests (live sweep)
+        run: node tools/run-tests.mjs --pattern "all-models-live" --output reports/test-results-live.json
+      - name: Upload live test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pull-request-test-results
-          path: reports/test-results.json
+          name: pr-tests-live
+          path: reports/test-results-live.json
+          if-no-files-found: warn
+
+  tests-tts:
+    name: Build Tests (tts)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm install
+      - name: Build Tests (tts live)
+        run: node tools/run-tests.mjs --pattern "tts-live" --output reports/test-results-tts.json
+      - name: Upload tts test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-tests-tts
+          path: reports/test-results-tts.json
+          if-no-files-found: warn
+
+  tests-models:
+    name: Build Tests (models export)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm install
+      - name: Build Tests (models export)
+        run: node tools/run-tests.mjs --pattern "models-export" --output reports/test-results-models.json
+      - name: Upload models export report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-tests-models
+          path: reports/test-results-models.json
           if-no-files-found: warn
 
   report-tests:
     name: Report Tests Statuses
     runs-on: ubuntu-latest
-    needs: run-tests
+    needs: [tests-core, tests-live, tests-tts, tests-models]
     if: always()
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download test report
+      - uses: actions/checkout@v4
+      - name: Download core tests
         uses: actions/download-artifact@v4
         continue-on-error: true
-        with:
-          name: pull-request-test-results
-          path: reports
-
-      - name: Report Tests Statuses
-        run: node tools/report-tests.mjs --title "Pull Request Test Results" --results reports/test-results.json
+        with: { name: pr-tests-core, path: reports }
+      - name: Download live tests
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { name: pr-tests-live, path: reports }
+      - name: Download tts tests
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { name: pr-tests-tts, path: reports }
+      - name: Download models export tests
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { name: pr-tests-models, path: reports }
+      - name: Report core tests
+        run: node tools/report-tests.mjs --title "PR Core Tests" --results reports/test-results-core.json
+      - name: Report live tests
+        run: node tools/report-tests.mjs --title "PR Live Models Sweep" --results reports/test-results-live.json
+      - name: Report tts tests
+        run: node tools/report-tests.mjs --title "PR TTS Live" --results reports/test-results-tts.json
+      - name: Report models export
+        run: node tools/report-tests.mjs --title "PR Models Export" --results reports/test-results-models.json

@@ -171,7 +171,6 @@ export async function chat(payload, client) {
     model: selectedModel,
     messages: filteredMessages,
     ...(referrer ? { referrer } : {}),
-    ...(rest.seed != null ? { seed: rest.seed } : {}),
     ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
     ...rest,
   };
@@ -268,7 +267,6 @@ export async function* chatStream(payload, client) {
     messages: filteredMessages,
     stream: true,
     ...(referrer ? { referrer } : {}),
-    ...(rest.seed != null ? { seed: rest.seed } : {}),
     ...(Array.isArray(tools) && tools.length ? { tools, tool_choice } : {}),
     ...rest,
   };
