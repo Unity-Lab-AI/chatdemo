@@ -865,6 +865,11 @@ const TTS_FETCH_SLOW_THRESHOLD_MS = 4200;
 const TTS_FETCH_VERY_SLOW_THRESHOLD_MS = 6500;
 const SILENT_WAV_DATA_URL = 'data:audio/wav;base64,UklGRhYAAABXQVZFZm10IBIAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=';
 const TTS_CHUNK_MAX_CHARS = 250;
+// TTS fetch timeouts: scale with chunk size to avoid long hangs
+const TTS_FETCH_TIMEOUT_MIN_MS = 10000;   // 10s
+const TTS_FETCH_TIMEOUT_MAX_MS = 40000;   // 40s cap
+const TTS_FETCH_TIMEOUT_BASE_MS = 12000;  // base for very short chunks
+const TTS_FETCH_TIMEOUT_PER_CHAR_MS = 30; // +30ms per char (250 chars -> +7.5s)
 const TTS_CHUNK_ERROR = Symbol('tts-chunk-error');
 let audioUnlocked = false;
 let audioUnlockPromise = null;
@@ -1058,7 +1063,13 @@ function buildTtsChunks(text, { maxChars = TTS_CHUNK_MAX_CHARS } = {}) {
   return chunks;
 }
 
-async function fetchTtsAudioUrl(text, voice) {
+function getTtsTimeoutForText(text) {
+  const len = Math.max(0, String(text || '').length);
+  const ms = TTS_FETCH_TIMEOUT_BASE_MS + (len * TTS_FETCH_TIMEOUT_PER_CHAR_MS);
+  return Math.max(TTS_FETCH_TIMEOUT_MIN_MS, Math.min(TTS_FETCH_TIMEOUT_MAX_MS, ms));
+}
+
+async function fetchTtsAudioUrl(text, voice, timeoutMs) {
   const ref = getReferrer();
   const base = 'https://text.pollinations.ai';
   const header = 'Speak only the following text, exactly as it is written:';
@@ -1083,7 +1094,15 @@ async function fetchTtsAudioUrl(text, voice) {
     // cache-buster to avoid any gateway caches returning truncated audio
     u.searchParams.set('cb', String(Date.now()) + Math.random().toString(36).slice(2));
     try {
-      const resp = await fetch(u.toString(), { method: 'GET' });
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : getTtsTimeoutForText(text));
+      const resp = await fetch(u.toString(), {
+        method: 'GET',
+        headers: { 'Accept': 'audio/mpeg' },
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(t);
       if (!resp.ok) throw new Error(`TTS HTTP ${resp.status}`);
       const blob = await resp.blob();
       // Basic sanity: require something that looks like audio
@@ -1224,7 +1243,7 @@ function runTtsFetchQueue() {
         let url = null;
         let error = null;
         try {
-          url = await fetchTtsAudioUrl(job.groups[index], job.voice);
+          url = await fetchTtsAudioUrl(job.groups[index], job.voice, getTtsTimeoutForText(job.groups[index]));
         } catch (err) {
           error = err;
         }
