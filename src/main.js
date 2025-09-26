@@ -1749,13 +1749,14 @@ async function handleChatResponse(initialResponse, model, endpoint) {
 
     if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
       await handleToolCalls(message.tool_calls);
+      const wantJsonAgain = endpoint !== 'openai';
       response = await chat(
         {
           model: model.id,
           endpoint,
           messages: state.conversation,
           ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
-          response_format: { type: 'json_object' },
+          ...(wantJsonAgain ? { response_format: { type: 'json_object' } } : {}),
         },
         client,
       );
@@ -2265,13 +2266,14 @@ async function requestChatCompletion(model, endpoints) {
     let retriedNetwork = false;
     for (;;) {
       try {
+        const wantJson = endpoint !== 'openai';
         const response = await chat(
           {
             model: model.id,
             endpoint,
             messages: state.conversation,
             ...(shouldIncludeTools(model, endpoint) ? { tools: [IMAGE_TOOL], tool_choice: 'auto' } : {}),
-            response_format: { type: 'json_object' },
+            ...(wantJson ? { response_format: { type: 'json_object' } } : {}),
           },
           client,
         );

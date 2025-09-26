@@ -283,7 +283,9 @@ export async function* chatStream(payload, client) {
     } catch {}
     const resp = await c.fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      // Do not set Accept: text/event-stream — Pollinations returns SSE without it,
+      // and some gateways 500/400 if Accept is forced.
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
